@@ -8,7 +8,9 @@ import '../../core/history/history_manager.dart';
 import '../../core/logging/app_logger.dart';
 import '../../features/ai_storyboard/application/ai_storyboard_controller.dart';
 import '../../features/ai_storyboard/application/generate_storyboard_from_script_use_case.dart';
+import '../../features/ai_storyboard/infrastructure/ai_provider_registry.dart';
 import '../../features/ai_storyboard/infrastructure/ai_provider_settings_repository.dart';
+import '../../features/ai_storyboard/infrastructure/remote_ai_storyboard_generator.dart';
 import '../../features/project_library/application/project_library_controller.dart';
 import '../../features/project_library/domain/project_library_repository.dart';
 import '../../features/project_workspace/application/project_workspace_command_service.dart';
@@ -121,8 +123,14 @@ final aiProviderSettingsRepositoryProvider =
       );
     });
 
+final aiProviderRegistryProvider = Provider<AiProviderRegistry>((ref) {
+  return AiProviderRegistry();
+});
+
 final aiStoryboardGeneratorProvider = Provider<AiStoryboardGenerator>((ref) {
-  return FakeAiStoryboardGenerator();
+  return RemoteAiStoryboardGenerator(
+    providerRegistry: ref.watch(aiProviderRegistryProvider),
+  );
 });
 
 final generateStoryboardUseCaseProvider =

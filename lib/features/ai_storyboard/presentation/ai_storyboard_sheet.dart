@@ -29,7 +29,7 @@ Future<void> showAiStoryboardSheet(
         child: _AiStoryboardSheet(projectId: projectId),
       );
     },
-    transitionBuilder: (context, animation, _, child) {
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
@@ -60,6 +60,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
   final _baseUrlController = TextEditingController();
   final _modelController = TextEditingController();
   final _apiKeyController = TextEditingController();
+
   String? _syncedConfigSignature;
   bool _obscureApiKey = true;
 
@@ -83,7 +84,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
     return Material(
       color: Colors.transparent,
       child: Container(
-        width: 620,
+        width: 640,
         margin: const EdgeInsets.only(top: 16, right: 16, bottom: 16),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
@@ -114,7 +115,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Phase 1 先走本地模拟生成，先把脚本输入、预览编辑和导入项目这条链路打通。',
+                            '把文案脚本直接交给在线 AI，先出草案，再在导入前人工复核。',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -175,10 +176,9 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
                                 controller: _scriptController,
                                 minLines: 8,
                                 maxLines: 12,
-                                onChanged: (value) =>
-                                    controller.updateScriptInput(value),
+                                onChanged: controller.updateScriptInput,
                                 decoration: const InputDecoration(
-                                  hintText: '把文案脚本、口播稿、分段剧情或拍摄需求粘贴到这里。',
+                                  hintText: '把文案脚本、口播稿、剧情段落或拍摄需求粘贴到这里。',
                                   border: OutlineInputBorder(),
                                   alignLabelWithHint: true,
                                 ),
@@ -243,7 +243,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
                         const SizedBox(height: 16),
                         _SectionCard(
                           title: '服务商设置',
-                          subtitle: '当前先保存预设和密钥，后续接真实 AI 时直接复用。',
+                          subtitle: '配置只保存在当前电脑，不写入项目包。生成时会真实联网调用。',
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -358,7 +358,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
                             FilledButton.icon(
                               onPressed: state.isGenerating
                                   ? null
-                                  : controller.generateDraft,
+                                  : _generateDraft,
                               icon: state.isGenerating
                                   ? const SizedBox(
                                       width: 14,
@@ -372,25 +372,28 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
                                 state.isGenerating ? '生成中...' : '生成草案',
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            if (state.result.draftShots.isNotEmpty)
-                              Text(
-                                '已生成 ${state.result.draftShots.length} 条镜头草案',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
+                            const SizedBox(width: 10),
+                            Text(
+                              state.isGenerating
+                                  ? '正在请求在线 AI...'
+                                  : '生成结果会先停留在草案区，不会直接写入项目。',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                           ],
                         ),
                         const SizedBox(height: 16),
                         _SectionCard(
                           title: state.result.title,
-                          subtitle: '可以先在这里快速修，再导入到当前项目。',
+                          subtitle: state.result.draftShots.isEmpty
+                              ? '生成后会在这里出现草案列表。'
+                              : '可以删改草案，再一次性导入到当前项目。',
                           child: state.result.draftShots.isEmpty
                               ? Padding(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 18,
                                   ),
                                   child: Text(
-                                    '还没有生成内容。先输入脚本，再点“生成草案”。',
+                                    '还没有生成内容。先输入脚本，再点击“生成草案”。',
                                     style: Theme.of(
                                       context,
                                     ).textTheme.bodyMedium,
@@ -489,6 +492,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
     if (file == null) {
       return;
     }
+
     try {
       final content = await File(file.path).readAsString();
       if (!mounted) {
@@ -508,6 +512,20 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
   }
 
   Future<void> _saveProviderConfig() async {
+    await _persistProviderConfig(showSnackBar: true);
+  }
+
+  Future<void> _generateDraft() async {
+    await _persistProviderConfig(showSnackBar: false);
+    if (!mounted) {
+      return;
+    }
+    await ref
+        .read(aiStoryboardControllerProvider(widget.projectId).notifier)
+        .generateDraft();
+  }
+
+  Future<void> _persistProviderConfig({required bool showSnackBar}) async {
     final controller = ref.read(
       aiStoryboardControllerProvider(widget.projectId).notifier,
     );
@@ -520,7 +538,7 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
         model: _modelController.text.trim(),
       ),
     );
-    if (!mounted) {
+    if (!mounted || !showSnackBar) {
       return;
     }
     ScaffoldMessenger.of(
@@ -634,7 +652,7 @@ class _ProviderProtocolHint extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '${preset.label} 默认接法：${preset.protocolLabel}',
+              '${preset.label} 默认协议：${preset.protocolLabel}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -746,6 +764,10 @@ class _DraftCard extends StatelessWidget {
             _DraftLine(label: '台词', value: draft.dialogue),
           if (draft.notes.trim().isNotEmpty)
             _DraftLine(label: '备注', value: draft.notes),
+          if (draft.sceneExpectation.trim().isNotEmpty)
+            _DraftLine(label: '场景预期', value: draft.sceneExpectation),
+          if (draft.audio.trim().isNotEmpty)
+            _DraftLine(label: '声音', value: draft.audio),
           const SizedBox(height: 8),
           Text(
             '来源摘录：${draft.sourceExcerpt}',

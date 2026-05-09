@@ -76,6 +76,58 @@ class ProjectWorkspaceCommandService {
     return result.payload! as ShotRecord;
   }
 
+  Future<List<ShotRecord>> importSeedShotsBatch(
+    String projectId, {
+    required List<ShotRecord> seedShots,
+  }) async {
+    if (seedShots.isEmpty) {
+      return const [];
+    }
+
+    final existingShots = await workspaceRepository.loadShots(projectId);
+    final createdShots = <ShotRecord>[];
+    final effectiveSeeds = <ShotRecord>[];
+
+    try {
+      for (var index = 0; index < seedShots.length; index++) {
+        final seed = seedShots[index];
+        final effectiveSeed =
+            (seed.id.trim().isEmpty ? seed.copyWith(id: _uuid.v4()) : seed)
+                .copyWith(orderIndex: existingShots.length + index);
+        effectiveSeeds.add(effectiveSeed);
+        final created = await workspaceRepository.createShot(
+          projectId,
+          seedShot: effectiveSeed,
+        );
+        createdShots.add(created);
+      }
+    } catch (_) {
+      for (final shot in createdShots.reversed) {
+        await workspaceRepository.deleteShot(projectId, shot.id);
+      }
+      rethrow;
+    }
+
+    historyManager.record(
+      HistoryEntry(
+        label: 'ImportAiStoryboardDrafts',
+        createdAt: DateTime.now(),
+        undo: () async {
+          for (final shot in createdShots.reversed) {
+            await workspaceRepository.deleteShot(projectId, shot.id);
+          }
+        },
+        redo: () async {
+          for (final seed in effectiveSeeds) {
+            await workspaceRepository.createShot(projectId, seedShot: seed);
+          }
+        },
+      ),
+    );
+
+    return createdShots;
+  }
+
   Future<void> updateField({
     required String projectId,
     required String shotId,

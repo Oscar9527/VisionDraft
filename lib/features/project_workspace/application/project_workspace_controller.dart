@@ -392,20 +392,16 @@ class ProjectWorkspaceController
     if (drafts.isEmpty) {
       return;
     }
-    final createdShots = <ShotRecord>[];
-    for (var index = 0; index < drafts.length; index++) {
-      final draft = drafts[index];
-      final created = await ref
-          .read(workspaceCommandServiceProvider)
-          .createShot(
-            arg,
-            seedShot: _seedShotFromAiDraft(
-              draft,
-              orderIndex: state.shots.length + index,
-            ),
-          );
-      createdShots.add(created);
-    }
+    final seedShots = [
+      for (var index = 0; index < drafts.length; index++)
+        _seedShotFromAiDraft(
+          drafts[index],
+          orderIndex: state.shots.length + index,
+        ),
+    ];
+    final createdShots = await ref
+        .read(workspaceCommandServiceProvider)
+        .importSeedShotsBatch(arg, seedShots: seedShots);
     state = state.copyWith(
       shots: [...state.shots, ...createdShots],
       isLoading: false,

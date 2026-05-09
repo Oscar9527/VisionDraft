@@ -1,0 +1,53 @@
+const storyboardResponseSchema = <String, dynamic>{
+  'type': 'object',
+  'properties': {
+    'title': {
+      'type': 'string',
+      'description': 'The title of the generated storyboard draft.',
+    },
+    'warnings': {
+      'type': 'array',
+      'items': {'type': 'string'},
+      'description': 'Warnings or caveats about uncertain inferences.',
+    },
+    'shots': {
+      'type': 'array',
+      'items': {
+        'type': 'object',
+        'properties': {
+          'shotNo': {'type': 'string'},
+          'shotSize': {'type': 'string'},
+          'durationSec': {'type': 'integer'},
+          'content': {'type': 'string'},
+          'dialogue': {'type': 'string'},
+          'notes': {'type': 'string'},
+          'sceneExpectation': {'type': 'string'},
+          'audio': {'type': 'string'},
+          'cameraAngle': {'type': 'string'},
+          'cameraMove': {'type': 'string'},
+          'cameraRig': {'type': 'string'},
+          'focalLength': {'type': 'string'},
+          'confidence': {'type': 'number'},
+          'sourceExcerpt': {'type': 'string'},
+        },
+        'required': [
+          'shotNo',
+          'shotSize',
+          'durationSec',
+          'content',
+          'dialogue',
+          'notes',
+          'sceneExpectation',
+          'audio',
+          'cameraAngle',
+          'cameraMove',
+          'cameraRig',
+          'focalLength',
+          'confidence',
+          'sourceExcerpt',
+        ],
+      },
+    },
+  },
+  'required': ['title', 'warnings', 'shots'],
+};

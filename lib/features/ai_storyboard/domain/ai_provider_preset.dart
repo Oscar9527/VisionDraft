@@ -21,7 +21,7 @@ const aiProviderPresets = <AiProviderPreset>[
     type: AiProviderType.chatgpt,
     label: 'ChatGPT',
     defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5',
+    defaultModel: 'gpt-5.2',
     protocolLabel: 'OpenAI Responses API',
   ),
   AiProviderPreset(
@@ -35,14 +35,14 @@ const aiProviderPresets = <AiProviderPreset>[
     type: AiProviderType.gemini,
     label: 'Gemini',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'gemini-2.0-flash',
+    defaultModel: 'gemini-2.5-flash',
     protocolLabel: 'Gemini generateContent',
   ),
   AiProviderPreset(
     type: AiProviderType.deepseek,
     label: 'DeepSeek',
     defaultBaseUrl: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'deepseek-v4-flash',
     protocolLabel: 'OpenAI-Compatible Chat API',
   ),
   AiProviderPreset(

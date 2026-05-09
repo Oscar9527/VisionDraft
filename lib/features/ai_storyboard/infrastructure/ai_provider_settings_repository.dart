@@ -32,13 +32,17 @@ class AiProviderSettingsRepository {
       if (value is Map<String, dynamic>) {
         next[type] = AiProviderConfig.fromJson(value);
       } else if (value is Map) {
-        next[type] = AiProviderConfig.fromJson(Map<String, dynamic>.from(value));
+        next[type] = AiProviderConfig.fromJson(
+          Map<String, dynamic>.from(value),
+        );
       }
     }
     return next;
   }
 
-  Future<void> saveConfigs(Map<AiProviderType, AiProviderConfig> configs) async {
+  Future<void> saveConfigs(
+    Map<AiProviderType, AiProviderConfig> configs,
+  ) async {
     final payload = <String, dynamic>{
       for (final entry in configs.entries) entry.key.name: entry.value.toJson(),
     };
