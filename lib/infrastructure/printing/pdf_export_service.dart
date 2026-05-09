@@ -101,30 +101,19 @@ class PdfExportService {
       for (final shot in payload.shots)
         shot.id: _sheetRowHeightValue(payload, shot.id, visibleFields),
     };
-    final resolvedMetrics = _resolveShotSheetMetrics(
+    final layout = _resolveShotSheetLayout(
       payload: payload,
       visibleFields: visibleFields,
       columnWidths: baseColumnWidths,
       rowHeights: baseRowHeights,
     );
-    final columnWidths = resolvedMetrics.columnWidths;
-    final rowHeights = resolvedMetrics.rowHeights;
-    final layout = resolvedMetrics.layout;
-    final renderScale = layout.scale;
-    final headerScale = math.max(0.72, renderScale);
-    final renderColumnWidths = {
-      for (final entry in columnWidths.entries) entry.key: entry.value * renderScale,
-    };
-    final renderRowHeights = {
-      for (final entry in rowHeights.entries) entry.key: entry.value * renderScale,
-    };
     final tableRows = <pw.TableRow>[
       _tableHeaderRow(
         visibleFields
             .map((fieldKey) => _fieldLabel(payload, fieldKey))
             .toList(),
-        rowHeight: math.max(18, layout.headerRowHeight * renderScale),
-        fontSize: math.max(6.4, 8.6 * headerScale),
+        rowHeight: layout.headerRowHeight,
+        fontSize: layout.headerFontSize,
       ),
     ];
 
@@ -136,8 +125,10 @@ class PdfExportService {
           preset: payload.boardPreset,
           imageCache: imageCache,
           payload: payload,
-          rowHeight: renderRowHeights[shot.id]!,
-          textScale: renderScale,
+          rowHeight: layout.rowHeights[shot.id] ?? layout.defaultRowHeight,
+          bodyFontSize: layout.bodyFontSize,
+          maxTextLines: layout.maxTextLines,
+          imagePadding: layout.imagePadding,
         ),
       );
     }
@@ -147,7 +138,7 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4.landscape,
         margin: layout.margin,
         build: (context) => pw.SizedBox(
-          width: layout.contentWidth * renderScale,
+          width: layout.contentWidth,
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
@@ -156,9 +147,9 @@ class PdfExportService {
                 projectName: payload.bundle.name,
                 payload: payload,
                 brandingLogo: brandingLogo,
-                scale: headerScale,
+                scale: layout.headerScale,
               ),
-              pw.SizedBox(height: layout.headerSpacing * headerScale),
+              pw.SizedBox(height: layout.headerSpacing),
               pw.Table(
                 border: _shotSheetTableBorder(),
                 defaultVerticalAlignment:
@@ -166,7 +157,7 @@ class PdfExportService {
                 columnWidths: {
                   for (var index = 0; index < visibleFields.length; index++)
                     index: pw.FixedColumnWidth(
-                      renderColumnWidths[visibleFields[index]]!,
+                      layout.columnWidths[visibleFields[index]]!,
                     ),
                 },
                 children: tableRows,
@@ -510,10 +501,11 @@ class PdfExportService {
     required Map<String, pw.MemoryImage> imageCache,
     required ExportPayload payload,
     required double rowHeight,
-    required double textScale,
+    required double bodyFontSize,
+    required int maxTextLines,
+    required double imagePadding,
   }) async {
     final cells = <pw.Widget>[];
-    final effectiveTextScale = math.max(0.76, textScale);
 
     for (final fieldKey in fields) {
       if (_isImageField(payload, fieldKey)) {
@@ -522,7 +514,7 @@ class PdfExportService {
         cells.add(
           pw.Container(
             height: rowHeight,
-            padding: const pw.EdgeInsets.all(4),
+            padding: pw.EdgeInsets.all(imagePadding),
             child: _pdfImageBox(
               image: image,
               aspectRatio: preset.aspectRatio,
@@ -537,11 +529,14 @@ class PdfExportService {
         pw.Container(
           height: rowHeight,
           alignment: pw.Alignment.centerLeft,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+          padding: pw.EdgeInsets.symmetric(
+            horizontal: math.max(3.0, imagePadding + 0.5),
+            vertical: math.max(2.0, imagePadding * 0.72),
+          ),
           child: pw.Text(
             _fieldValue(shot, fieldKey, preset),
-            style: pw.TextStyle(fontSize: math.max(6.0, 8.2 * effectiveTextScale)),
-            maxLines: rowHeight >= 52 ? 4 : 3,
+            style: pw.TextStyle(fontSize: bodyFontSize),
+            maxLines: maxTextLines,
             overflow: pw.TextOverflow.clip,
           ),
         ),
@@ -873,7 +868,7 @@ class PdfExportService {
     return value is AssetRef ? value : null;
   }
 
-  _ShotSheetLayout _computeShotSheetLayout({
+  _ShotSheetLayout _resolveShotSheetLayout({
     required ExportPayload payload,
     required List<String> visibleFields,
     required Map<String, double> columnWidths,
@@ -882,155 +877,176 @@ class PdfExportService {
     const margin = pw.EdgeInsets.fromLTRB(16, 16, 16, 16);
     const headerHeight = 46.0;
     const headerSpacing = 8.0;
-    const headerRowHeight = 26.0;
-    final contentWidth = visibleFields.fold<double>(
-      0,
-      (sum, fieldKey) => sum + columnWidths[fieldKey]!,
-    );
-    final rowsHeight = payload.shots.fold<double>(
-      0,
-      (sum, shot) => sum + rowHeights[shot.id]!,
-    );
-    final contentHeight =
-        headerHeight + headerSpacing + headerRowHeight + rowsHeight;
+    final hasImage = visibleFields.any((fieldKey) => _isImageField(payload, fieldKey));
     final availableWidth =
         PdfPageFormat.a4.landscape.availableWidth - margin.left - margin.right;
     final availableHeight =
         PdfPageFormat.a4.landscape.availableHeight - margin.top - margin.bottom;
-    final scale = math.min(
-      1.0,
-      math.min(
-        availableWidth / math.max(contentWidth, 1),
-        availableHeight / math.max(contentHeight, 1),
-      ),
+    final rowCount = math.max(payload.shots.length, 1);
+    final headerRowHeight = _clampDouble(
+      availableHeight / (rowCount + 1) * 0.58,
+      18,
+      hasImage ? 26 : 24,
     );
+    final tableHeight = math.max(
+      24.0,
+      availableHeight - headerHeight - headerSpacing - headerRowHeight,
+    );
+    final normalizedColumnWidths = _fitFieldWidthsToPage(
+      payload: payload,
+      visibleFields: visibleFields,
+      desiredWidths: columnWidths,
+      targetWidth: availableWidth,
+    );
+    final normalizedRowHeights = _fitRowHeightsToPage(
+      payload: payload,
+      desiredHeights: rowHeights,
+      targetHeight: tableHeight,
+      hasImage: hasImage,
+    );
+    final averageRowHeight = normalizedRowHeights.isEmpty
+        ? (hasImage ? 42.0 : 30.0)
+        : normalizedRowHeights.values.fold<double>(0, (sum, value) => sum + value) /
+            normalizedRowHeights.length;
+    final bodyFontSize = _clampDouble(
+      averageRowHeight * (hasImage ? 0.18 : 0.22),
+      5.2,
+      9.2,
+    );
+    final headerFontSize = _clampDouble(bodyFontSize + 0.9, 6.2, 9.6);
+    final maxTextLines = math.max(
+      2,
+      math.min(6, (averageRowHeight / (bodyFontSize * 1.35)).floor()),
+    );
+    final imagePadding = _clampDouble(averageRowHeight * 0.055, 2.0, 4.0);
+    final headerScale = _clampDouble(bodyFontSize / 8.2, 0.82, 1.0);
+
     return _ShotSheetLayout(
       margin: margin,
       headerSpacing: headerSpacing,
       headerRowHeight: headerRowHeight,
-      contentWidth: contentWidth,
-      scale: scale.isFinite && scale > 0 ? scale : 1.0,
+      headerFontSize: headerFontSize,
+      bodyFontSize: bodyFontSize,
+      headerScale: headerScale,
+      maxTextLines: maxTextLines,
+      imagePadding: imagePadding,
+      defaultRowHeight: averageRowHeight,
+      contentWidth: availableWidth,
+      columnWidths: normalizedColumnWidths,
+      rowHeights: normalizedRowHeights,
     );
   }
 
-  _ResolvedShotSheetMetrics _resolveShotSheetMetrics({
+  Map<String, double> _fitFieldWidthsToPage({
     required ExportPayload payload,
     required List<String> visibleFields,
-    required Map<String, double> columnWidths,
-    required Map<String, double> rowHeights,
+    required Map<String, double> desiredWidths,
+    required double targetWidth,
   }) {
-    var activeColumnWidths = Map<String, double>.from(columnWidths);
-    var activeRowHeights = Map<String, double>.from(rowHeights);
-    var layout = _computeShotSheetLayout(
-      payload: payload,
-      visibleFields: visibleFields,
-      columnWidths: activeColumnWidths,
-      rowHeights: activeRowHeights,
-    );
-
-    if (layout.scale >= 0.78) {
-      return _ResolvedShotSheetMetrics(
-        columnWidths: activeColumnWidths,
-        rowHeights: activeRowHeights,
-        layout: layout,
-      );
+    final minWidths = {
+      for (final fieldKey in visibleFields)
+        fieldKey: _sheetColumnMinWidth(payload, fieldKey),
+    };
+    final minWidthTotal = minWidths.values.fold<double>(0, (sum, value) => sum + value);
+    if (minWidthTotal >= targetWidth) {
+      final scale = targetWidth / math.max(minWidthTotal, 1);
+      return {
+        for (final fieldKey in visibleFields) fieldKey: minWidths[fieldKey]! * scale,
+      };
     }
 
-    for (final level in const [1, 2]) {
-      activeColumnWidths = _compactShotSheetColumnWidths(
-        payload,
-        activeColumnWidths,
-        level: level,
-      );
-      activeRowHeights = _compactShotSheetRowHeights(
-        payload,
-        visibleFields,
-        activeRowHeights,
-        level: level,
-      );
-      layout = _computeShotSheetLayout(
-        payload: payload,
-        visibleFields: visibleFields,
-        columnWidths: activeColumnWidths,
-        rowHeights: activeRowHeights,
-      );
-      if (layout.scale >= 0.62) {
-        break;
-      }
-    }
-
-    return _ResolvedShotSheetMetrics(
-      columnWidths: activeColumnWidths,
-      rowHeights: activeRowHeights,
-      layout: layout,
+    final remaining = targetWidth - minWidthTotal;
+    final weightTotal = visibleFields.fold<double>(
+      0,
+      (sum, fieldKey) => sum + math.max(1.0, desiredWidths[fieldKey] ?? 1.0),
     );
+    return {
+      for (final fieldKey in visibleFields)
+        fieldKey:
+            minWidths[fieldKey]! +
+            remaining *
+                (math.max(1.0, desiredWidths[fieldKey] ?? 1.0) / math.max(weightTotal, 1)),
+    };
   }
 
-  Map<String, double> _compactShotSheetColumnWidths(
-    ExportPayload payload,
-    Map<String, double> widths, {
-    required int level,
+  Map<String, double> _fitRowHeightsToPage({
+    required ExportPayload payload,
+    required Map<String, double> desiredHeights,
+    required double targetHeight,
+    required bool hasImage,
   }) {
-    final factor = level == 1 ? 0.86 : 0.74;
-    return {
-      for (final entry in widths.entries)
-        entry.key: _sheetColumnWidthBounds(
-          payload,
-          entry.key,
-          entry.value * factor,
-          level: level,
+    if (payload.shots.isEmpty) {
+      return const {};
+    }
+
+    final minRowHeight = hasImage ? 24.0 : 18.0;
+    final minTotal = minRowHeight * payload.shots.length;
+    if (minTotal >= targetHeight) {
+      final scaledHeight = targetHeight / payload.shots.length;
+      return {
+        for (final shot in payload.shots) shot.id: scaledHeight,
+      };
+    }
+
+    final remaining = targetHeight - minTotal;
+    final weights = {
+      for (final shot in payload.shots)
+        shot.id: _shotRowWeight(
+          shot,
+          desiredHeights[shot.id] ?? minRowHeight,
+          hasImage: hasImage,
         ),
     };
-  }
-
-  Map<String, double> _compactShotSheetRowHeights(
-    ExportPayload payload,
-    List<String> visibleFields,
-    Map<String, double> heights, {
-    required int level,
-  }) {
-    final hasImage = visibleFields.any((fieldKey) => _isImageField(payload, fieldKey));
-    final factor = hasImage
-        ? (level == 1 ? 0.76 : 0.62)
-        : (level == 1 ? 0.82 : 0.7);
-    final minHeight = hasImage
-        ? (level == 1 ? 68.0 : 54.0)
-        : (level == 1 ? 46.0 : 36.0);
-    final maxHeight = hasImage ? 92.0 : 60.0;
+    final weightTotal = weights.values.fold<double>(0, (sum, value) => sum + value);
     return {
-      for (final entry in heights.entries)
-        entry.key: _clampDouble(entry.value * factor, minHeight, maxHeight),
+      for (final shot in payload.shots)
+        shot.id:
+            minRowHeight +
+            remaining * ((weights[shot.id] ?? 1.0) / math.max(weightTotal, 1)),
     };
   }
 
-  double _sheetColumnWidthBounds(
-    ExportPayload payload,
-    String fieldKey,
-    double value, {
-    required int level,
+  double _sheetColumnMinWidth(ExportPayload payload, String fieldKey) {
+    return switch (fieldKey) {
+      'shotNo' => 38,
+      'durationSec' => 34,
+      'shotSize' => 44,
+      'cameraAngle' || 'cameraMove' => 56,
+      'cameraRig' => 62,
+      'focalLength' => 52,
+      'content' => 110,
+      'dialogue' || 'notes' || 'sceneExpectation' => 92,
+      'audio' => 82,
+      'frameImage' => 96,
+      'referenceImage' => 88,
+      _ when _isImageField(payload, fieldKey) => 88,
+      _ => 76,
+    }.toDouble();
+  }
+
+  double _shotRowWeight(
+    ShotRecord shot,
+    double desiredHeight, {
+    required bool hasImage,
   }) {
-    final (minWidth, maxWidth) = switch (fieldKey) {
-      'shotNo' => (44.0, level == 1 ? 58.0 : 52.0),
-      'durationSec' => (44.0, level == 1 ? 60.0 : 54.0),
-      'shotSize' => (52.0, level == 1 ? 70.0 : 62.0),
-      'cameraAngle' || 'cameraMove' => (76.0, level == 1 ? 92.0 : 82.0),
-      'cameraRig' => (82.0, level == 1 ? 100.0 : 88.0),
-      'focalLength' => (70.0, level == 1 ? 84.0 : 78.0),
-      'content' => (150.0, level == 1 ? 220.0 : 180.0),
-      'dialogue' || 'notes' || 'sceneExpectation' => (
-        126.0,
-        level == 1 ? 176.0 : 150.0,
-      ),
-      'audio' => (110.0, level == 1 ? 156.0 : 136.0),
-      'frameImage' => (110.0, level == 1 ? 180.0 : 148.0),
-      'referenceImage' => (102.0, level == 1 ? 156.0 : 132.0),
-      _ when _isImageField(payload, fieldKey) => (
-        102.0,
-        level == 1 ? 156.0 : 132.0,
-      ),
-      _ => (96.0, level == 1 ? 148.0 : 128.0),
-    };
-    return _clampDouble(value, minWidth, maxWidth);
+    final textLength =
+        shot.content.length +
+        shot.dialogue.length +
+        shot.notes.length +
+        shot.sceneExpectation.length +
+        shot.audio.length +
+        shot.customFieldValues.values
+            .whereType<String>()
+            .fold<int>(0, (sum, value) => sum + value.length);
+    final normalizedDesired = desiredHeight / (hasImage ? 88.0 : 64.0);
+    final textWeight = math.min(2.4, textLength / 100);
+    final imageWeight =
+        shot.frameImage != null ||
+            shot.referenceImage != null ||
+            shot.customFieldValues.values.any((value) => value is AssetRef)
+        ? 0.7
+        : (hasImage ? 0.28 : 0.0);
+    return math.max(1.0, normalizedDesired) + textWeight + imageWeight;
   }
 }
 
@@ -1039,27 +1055,29 @@ class _ShotSheetLayout {
     required this.margin,
     required this.headerSpacing,
     required this.headerRowHeight,
+    required this.headerFontSize,
+    required this.bodyFontSize,
+    required this.headerScale,
+    required this.maxTextLines,
+    required this.imagePadding,
+    required this.defaultRowHeight,
     required this.contentWidth,
-    required this.scale,
+    required this.columnWidths,
+    required this.rowHeights,
   });
 
   final pw.EdgeInsets margin;
   final double headerSpacing;
   final double headerRowHeight;
+  final double headerFontSize;
+  final double bodyFontSize;
+  final double headerScale;
+  final int maxTextLines;
+  final double imagePadding;
+  final double defaultRowHeight;
   final double contentWidth;
-  final double scale;
-}
-
-class _ResolvedShotSheetMetrics {
-  const _ResolvedShotSheetMetrics({
-    required this.columnWidths,
-    required this.rowHeights,
-    required this.layout,
-  });
-
   final Map<String, double> columnWidths;
   final Map<String, double> rowHeights;
-  final _ShotSheetLayout layout;
 }
 
 double _clampDouble(double value, double min, double max) {
