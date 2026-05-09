@@ -1,65 +1,51 @@
 # VisionDraft
 
-> Local-first storyboard planning and shooting preparation software for Windows desktop.  
-> 面向 Windows 桌面的本地优先分镜策划与拍摄前统筹软件。
+<p align="center">
+  Local-first storyboard planning and shooting preparation software for Windows desktop.
+</p>
 
-## Table of Contents
+<p align="center">
+  <a href="./README.md">English</a> ·
+  <a href="./README.zh-CN.md">简体中文</a> ·
+  <a href="https://github.com/Oscar9527/VisionDraft/releases">Releases</a>
+</p>
 
-- [Overview](#overview)
-- [Product Scope](#product-scope)
-- [Current Status](#current-status)
-- [Core Features](#core-features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Windows Build](#windows-build)
-- [Project Bundle Format](#project-bundle-format)
-- [Repository Notes](#repository-notes)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
-- [中文说明](#中文说明)
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4" alt="Windows" />
+  <img src="https://img.shields.io/badge/Flutter-3.41.9-02569B" alt="Flutter 3.41.9" />
+  <img src="https://img.shields.io/badge/status-active%20development-6f42c1" alt="Active Development" />
+  <img src="https://img.shields.io/badge/storage-local--first-2ea44f" alt="Local First" />
+</p>
 
 ## Overview
 
-VisionDraft is a local-first desktop application for film pre-production. It is built for directors, storyboard artists, cinematographers, and solo creators who need a practical workflow for:
+VisionDraft is a local-first desktop application for film pre-production. It is built for directors, storyboard artists, cinematographers, and solo creators who need a practical workflow for shot planning, visual review, shooting organization, and printable output.
 
-- structuring shots
-- reviewing storyboard cards
-- regrouping shots into shooting plans
-- exporting printable production sheets
+The current public deliverable is the **Windows desktop version**.
 
-The current public deliverable is the **Windows desktop version**. This repository does not publicly promise unfinished platform targets.
+## Why VisionDraft
 
-## Product Scope
+Traditional storyboard workflows are often split between paper notes, image folders, and spreadsheets. VisionDraft consolidates that process into a structured desktop workspace so creators can:
 
-VisionDraft focuses on pre-shoot planning rather than scriptwriting. The software is designed to replace paper notes and spreadsheet-based shot lists with a structured desktop workflow that remains fully usable offline.
+- build and edit shot lists
+- preview shots visually
+- regroup shots into shooting plans
+- export printable production documents
+- keep all project data available offline
 
-Primary workflow:
+## Current Scope
 
-1. Create or open a local project bundle
-2. Edit shots in the storyboard editor
-3. Review shots in board view
-4. Organize shooting sections and assignments
-5. Export shot sheets, shooting plans, and call sheets
+This repository currently documents and ships:
 
-## Current Status
+- Windows desktop runtime
+- local project bundle workflow
+- shot editing and storyboard browsing
+- shooting plan organization
+- PDF export and Windows print flow
 
-Current repository status:
+This repository does **not** publicly promise unfinished platform deliverables.
 
-- Delivery target: Windows desktop
-- Runtime: working
-- Build: working
-- Static analysis: passing
-- Tests: passing
-- Distribution form: portable folder build
-
-Known public boundary:
-
-- Windows desktop is the only production-facing target described in this README
-- Unfinished platforms are intentionally excluded from external delivery claims
-
-## Core Features
+## Features
 
 ### Storyboard Editor
 
@@ -68,57 +54,33 @@ Known public boundary:
 - custom columns
 - column visibility and ordering
 - project-level column templates
-- local-first project persistence
 
 ### Storyboard Board
 
-- card-based visual browsing
+- card-based browsing
 - shared display presets
-- thumbnail-first rendering for better performance
+- thumbnail-first rendering
 
 ### Shooting Plan
 
-- shot assignment into plan sections
-- section-based planning view
-- unassigned pool workflow
+- section-based organization
+- unassigned shot pool
+- shot-to-section assignment workflow
 
-### Export and Print
+### Export
 
 - shot sheet export
 - shooting plan export
 - call sheet export
-- Windows print flow
+- Windows print support
 
-## Tech Stack
+### Local-First Storage
 
-- Flutter
-- Riverpod
-- Drift
-- SQLite
-- Windows Desktop Runner
+- projects stored as `.vdraft` folders
+- offline-first workflow
+- local SQLite persistence
 
-## Project Structure
-
-```text
-lib/
-├─ app/                  # app bootstrap, routing, theme, layout shell
-├─ core/                 # command, history, cache, result, shared widgets
-├─ features/
-│  ├─ project_library/
-│  ├─ project_workspace/
-│  ├─ storyboard_editor/
-│  ├─ storyboard_board/
-│  ├─ shooting_plan/
-│  └─ export/
-└─ infrastructure/
-   ├─ database/
-   ├─ filesystem/
-   ├─ imaging/
-   ├─ printing/
-   └─ sync_stub/
-```
-
-## Getting Started
+## Quick Start
 
 ### Requirements
 
@@ -127,7 +89,7 @@ lib/
 - Visual Studio 2022 Build Tools
 - Windows development environment
 
-### Development
+### Run in development
 
 ```powershell
 flutter pub get
@@ -136,7 +98,7 @@ flutter test
 flutter run -d windows
 ```
 
-## Windows Build
+## Build for Windows
 
 Use the repository build script:
 
@@ -144,7 +106,7 @@ Use the repository build script:
 powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1
 ```
 
-Runnable output:
+Build output:
 
 ```text
 dist/windows/
@@ -171,125 +133,12 @@ MyProject.vdraft/
 
 App-level storage is used only for lightweight index data, cache, and temporary files. Core production data stays inside the project bundle.
 
-## Repository Notes
-
-- Source code belongs in GitHub
-- Local build outputs should not be committed
-- The repository already ignores generated folders such as:
-  - `dist/`
-  - `build/`
-  - `.dart_tool/`
-  - `tmp_build/`
-  - `tmp_run_logs/`
-
-To export a clean source archive:
-
-```powershell
-git archive --format=zip --output VisionDraft-source.zip HEAD
-```
-
-## Roadmap
-
-Near-term priorities:
-
-- continue stabilizing the Windows desktop workflow
-- improve export polish and print predictability
-- harden data editing and recovery flows
-- expand performance validation for large storyboard projects
-
-## Contributing
-
-This repository is still under active iteration. If you plan to contribute, keep changes focused and aligned with the existing local-first desktop architecture.
-
-Recommended validation before submitting changes:
-
-```powershell
-flutter analyze
-flutter test
-powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1
-```
-
-## License
-
-License has not been published in this repository yet.
-
----
-
-## 中文说明
-
-### 概览
-
-VisionDraft 是一款面向影视前期统筹的本地优先桌面软件，服务于导演、分镜师、摄影师和独立创作者。它的目标不是写剧本，而是把分镜录入、故事板浏览、拍摄计划整理和纸面执行输出整合到一个离线可用的桌面工作流里。
-
-当前仓库对外公开的交付目标只有 **Windows 桌面版**。
-
-### 产品范围
-
-VisionDraft 主要解决的是拍摄前准备阶段的组织问题，包括：
-
-- 镜头整理
-- 分镜表编辑
-- 故事板浏览
-- 拍摄计划重组
-- 分镜单、计划单、通告单导出
-
-当前不对外承诺未完成的平台版本。
-
-### 当前状态
-
-当前仓库状态：
-
-- 交付目标：Windows 桌面
-- 运行状态：可启动
-- 构建状态：可构建
-- 静态检查：已通过
-- 测试状态：已通过
-- 交付形态：绿色目录版
-
-### 核心功能
-
-#### 分镜制作
-
-- 表格式镜头录入
-- 固定字段编辑
-- 自定义列
-- 列显隐与列顺序
-- 项目级列模板
-- 本地项目持久化
-
-#### 故事板浏览
-
-- 卡片化镜头预览
-- 共享显示预设
-- 缩略图优先渲染
-
-#### 拍摄计划
-
-- 镜头分配到计划区块
-- 区块化计划视图
-- 未分配镜头池
-
-#### 导出与打印
-
-- 分镜单导出
-- 拍摄计划单导出
-- 拍摄通告单导出
-- Windows 打印流程
-
-### 技术栈
-
-- Flutter
-- Riverpod
-- Drift
-- SQLite
-- Windows Desktop Runner
-
-### 项目结构
+## Project Structure
 
 ```text
 lib/
-├─ app/                  # 启动、路由、主题、布局壳层
-├─ core/                 # command、history、cache、result、共享组件
+├─ app/
+├─ core/
 ├─ features/
 │  ├─ project_library/
 │  ├─ project_workspace/
@@ -305,90 +154,37 @@ lib/
    └─ sync_stub/
 ```
 
-### 本地开发
+## Development Notes
 
-环境要求：
-
-- Flutter `3.41.9`
-- Dart `3.11.5`
-- Visual Studio 2022 Build Tools
-- Windows 开发环境
-
-开发命令：
+Recommended validation before submitting changes:
 
 ```powershell
-flutter pub get
 flutter analyze
 flutter test
-flutter run -d windows
-```
-
-### Windows 构建
-
-使用仓库内构建脚本：
-
-```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1
 ```
 
-构建完成后的可运行目录：
+Generated directories such as `dist/`, `build/`, `.dart_tool/`, `tmp_build/`, and `tmp_run_logs/` should not be committed.
 
-```text
-dist/windows/
-```
-
-启动入口：
-
-```text
-dist/windows/vision_draft.exe
-```
-
-### 项目包格式
-
-每个项目使用独立 `.vdraft` 目录保存：
-
-```text
-MyProject.vdraft/
-├─ manifest.json
-├─ project.db
-├─ assets/
-│  └─ originals/
-└─ exports/
-```
-
-应用级目录只负责索引库、缓存和临时文件，不承载项目核心生产数据。
-
-### 仓库说明
-
-- GitHub 仓库应提交源码，不提交本地构建产物
-- `dist/`、`build/`、`.dart_tool/`、`tmp_build/`、`tmp_run_logs/` 等目录默认忽略
-- 如需导出干净源码包，可使用：
+To export a clean source archive:
 
 ```powershell
 git archive --format=zip --output VisionDraft-source.zip HEAD
 ```
 
-### 路线图
+## Roadmap
 
-下一阶段重点：
+Near-term priorities:
 
-- 继续打磨 Windows 桌面主工作流
-- 提升导出和打印的稳定性
-- 强化编辑与恢复流程
-- 扩大大项目性能验证覆盖
+- keep stabilizing the Windows desktop workflow
+- improve export polish and print predictability
+- harden data editing and recovery flows
+- expand performance validation for larger storyboard projects
 
-### 贡献说明
+## Contributing
 
-当前仓库仍在持续迭代，提交改动时建议保持小步、聚焦，并遵循现有的本地优先桌面架构。
+This repository is under active iteration. Keep contributions focused, incremental, and aligned with the existing local-first desktop architecture.
 
-建议提交前执行：
+## License
 
-```powershell
-flutter analyze
-flutter test
-powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1
-```
-
-### 许可证
-
-当前仓库尚未发布正式许可证文件。
+No formal license file has been published in this repository yet.
