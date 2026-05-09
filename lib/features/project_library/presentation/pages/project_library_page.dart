@@ -309,7 +309,6 @@ class _LibraryStats extends StatelessWidget {
           _StatChip(label: '项目数', value: '$totalCount'),
           _StatChip(label: hasQuery ? '筛选结果' : '当前视图', value: '$visibleCount'),
           const _StatChip(label: '存储形态', value: '.vdraft 项目目录'),
-          const _StatChip(label: '创建方式', value: '每次新建手动选位置'),
         ],
       ),
     );

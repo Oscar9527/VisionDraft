@@ -7,6 +7,20 @@ import 'shot_record.dart';
 
 enum ExportDocumentType { shotSheet, shootingPlan, callSheet }
 
+class ExportBranding {
+  const ExportBranding({
+    this.brandName = '',
+    this.tagline = '',
+    this.showDefaultLogo = false,
+    this.logoPath,
+  });
+
+  final String brandName;
+  final String tagline;
+  final bool showDefaultLogo;
+  final String? logoPath;
+}
+
 class ExportPayload {
   const ExportPayload({
     required this.bundle,
@@ -16,6 +30,7 @@ class ExportPayload {
     this.effectiveColumnWidths = const <String, double>{},
     this.effectiveRowHeights = const <String, double>{},
     this.fieldLabelsByKey = const <String, String>{},
+    this.branding = const ExportBranding(),
     required this.boardPreset,
     required this.planBoard,
     required this.callSheet,
@@ -29,6 +44,7 @@ class ExportPayload {
   final Map<String, double> effectiveColumnWidths;
   final Map<String, double> effectiveRowHeights;
   final Map<String, String> fieldLabelsByKey;
+  final ExportBranding branding;
   final BoardPreset boardPreset;
   final PlanBoard planBoard;
   final CallSheet callSheet;

@@ -1426,17 +1426,31 @@ class _ToolbarPillButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
     final scheme = Theme.of(context).colorScheme;
-    final borderColor = enabled ? scheme.outlineVariant : scheme.outlineVariant;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final borderColor = enabled
+        ? (isDark
+              ? scheme.outline.withValues(alpha: 0.92)
+              : scheme.outlineVariant)
+        : scheme.outlineVariant;
+    final backgroundColor = enabled
+        ? (isDark
+              ? scheme.surfaceContainerHigh.withValues(alpha: 0.42)
+              : Colors.transparent)
+        : (isDark
+              ? scheme.surfaceContainerHighest.withValues(alpha: 0.18)
+              : Colors.transparent);
     final textStyle = Theme.of(context).textTheme.labelLarge;
 
     return Material(
-      color: Colors.transparent,
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(999),
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(999),
         child: Ink(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
           decoration: BoxDecoration(
+            color: backgroundColor,
             border: Border.all(color: borderColor),
             borderRadius: BorderRadius.circular(999),
           ),

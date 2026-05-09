@@ -39,6 +39,7 @@ Future<void> main() async {
   final boardPreset = await repo.loadBoardPreset(projectId);
   final planBoard = await repo.loadPlanBoard(projectId);
   final callSheet = await repo.loadCallSheet(projectId);
+  final customColumns = await repo.loadCustomColumns(projectId);
 
   for (final type in ExportDocumentType.values) {
     final payload = ExportPayload(
@@ -48,6 +49,10 @@ Future<void> main() async {
       effectiveFieldOrderKeys: columnPreset.fieldOrderKeys,
       effectiveColumnWidths: const <String, double>{},
       effectiveRowHeights: const <String, double>{},
+      fieldLabelsByKey: {
+        for (final column in customColumns) column.fieldKey: column.name,
+      },
+      branding: const ExportBranding(),
       boardPreset: boardPreset,
       planBoard: planBoard,
       callSheet: callSheet,

@@ -11,45 +11,43 @@ class ThemeModeButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeControllerProvider);
+    final brightness = Theme.of(context).brightness;
+    final effectiveDark =
+        themeMode == ThemeMode.dark ||
+        (themeMode == ThemeMode.system && brightness == Brightness.dark);
+    final nextMode = effectiveDark ? ThemeMode.light : ThemeMode.dark;
+    final icon = effectiveDark
+        ? Icons.dark_mode_rounded
+        : Icons.light_mode_rounded;
+    final label = effectiveDark ? '深色' : '浅色';
+    final tooltip = effectiveDark ? '切换到浅色模式' : '切换到深色模式';
 
-    return PopupMenuButton<ThemeMode>(
-      tooltip: '切换显示模式',
-      initialValue: themeMode,
-      onSelected: (value) {
-        ref.read(themeModeControllerProvider.notifier).setThemeMode(value);
+    if (compact) {
+      return IconButton(
+        tooltip: tooltip,
+        onPressed: () {
+          ref.read(themeModeControllerProvider.notifier).setThemeMode(nextMode);
+        },
+        icon: Icon(icon, size: 18),
+        splashRadius: 18,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+        visualDensity: VisualDensity.compact,
+      );
+    }
+
+    return OutlinedButton.icon(
+      onPressed: () {
+        ref.read(themeModeControllerProvider.notifier).setThemeMode(nextMode);
       },
-      itemBuilder: (context) => [
-        CheckedPopupMenuItem<ThemeMode>(
-          value: ThemeMode.light,
-          checked: themeMode == ThemeMode.light,
-          child: const Text('浅色模式'),
-        ),
-        CheckedPopupMenuItem<ThemeMode>(
-          value: ThemeMode.dark,
-          checked: themeMode == ThemeMode.dark,
-          child: const Text('深色模式'),
-        ),
-        CheckedPopupMenuItem<ThemeMode>(
-          value: ThemeMode.system,
-          checked: themeMode == ThemeMode.system,
-          child: const Text('跟随系统'),
-        ),
-      ],
-      icon: Icon(_iconFor(themeMode), size: compact ? 18 : 20),
-      splashRadius: compact ? 18 : 20,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(
-        width: compact ? 30 : 34,
-        height: compact ? 30 : 34,
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        minimumSize: const Size(0, 36),
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
-  }
-
-  IconData _iconFor(ThemeMode themeMode) {
-    return switch (themeMode) {
-      ThemeMode.light => Icons.light_mode_rounded,
-      ThemeMode.dark => Icons.dark_mode_rounded,
-      ThemeMode.system => Icons.brightness_auto_rounded,
-    };
   }
 }

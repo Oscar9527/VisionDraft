@@ -8,9 +8,9 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../../../../app/bootstrap/providers.dart';
-import '../../../storyboard_editor/application/editor_grid_session.dart';
 import '../../../project_workspace/domain/models/export_payload.dart';
 import '../../../project_workspace/domain/queries/project_workspace_snapshot.dart';
+import '../../../storyboard_editor/application/editor_grid_session.dart';
 
 class ExportPage extends ConsumerStatefulWidget {
   const ExportPage({super.key, required this.projectId});
@@ -23,10 +23,37 @@ class ExportPage extends ConsumerStatefulWidget {
 
 class _ExportPageState extends ConsumerState<ExportPage> {
   final Set<ExportDocumentType> _busyTypes = <ExportDocumentType>{};
+  late final TextEditingController _brandNameController;
+  late final TextEditingController _brandTaglineController;
+
   ExportDocumentType _selectedType = ExportDocumentType.shotSheet;
   String? _lastSavedPath;
+  String? _brandLogoPath;
+  bool _showDefaultBrandLogo = true;
 
   static const _pdfTypeGroup = XTypeGroup(label: 'PDF', extensions: ['pdf']);
+  static const _imageTypeGroup = XTypeGroup(
+    label: 'Images',
+    extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'],
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _brandNameController = TextEditingController(text: 'VisionDraft');
+    _brandTaglineController = TextEditingController(text: '影视策划与前置统筹');
+    _brandNameController.addListener(_handleBrandingChanged);
+    _brandTaglineController.addListener(_handleBrandingChanged);
+  }
+
+  @override
+  void dispose() {
+    _brandNameController.removeListener(_handleBrandingChanged);
+    _brandTaglineController.removeListener(_handleBrandingChanged);
+    _brandNameController.dispose();
+    _brandTaglineController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,11 +64,23 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 1180;
         final previewFilename = _filenameFor(_selectedType, snapshot);
+        final previewKey = [
+          _selectedType.name,
+          previewFilename,
+          _brandLogoPath ?? '',
+          _showDefaultBrandLogo ? 'default-logo' : 'no-default-logo',
+          _brandNameController.text,
+          _brandTaglineController.text,
+        ].join('|');
 
         final sidebar = _ExportSidebar(
           snapshot: snapshot,
           selectedType: _selectedType,
           lastSavedPath: _lastSavedPath,
+          brandNameController: _brandNameController,
+          brandTaglineController: _brandTaglineController,
+          brandLogoPath: _brandLogoPath,
+          showDefaultBrandLogo: _showDefaultBrandLogo,
           busyTypes: _busyTypes,
           onTypeSelected: (type) {
             if (_selectedType == type) {
@@ -54,12 +93,17 @@ class _ExportPageState extends ConsumerState<ExportPage> {
           onGenerate: () => _exportDocument(_selectedType),
           onPrint: () => _printDocument(_selectedType),
           onShare: () => _shareDocument(_selectedType),
+          onPickLogo: _pickBrandLogo,
+          onClearBranding: _clearBranding,
+          onResetBranding: _resetBranding,
+          onBrandingChanged: _handleBrandingChanged,
           titleForType: _titleForType,
           subtitleForType: _subtitleForType,
           iconForType: _iconForType,
         );
 
         final preview = _ExportPreviewPanel(
+          previewKey: previewKey,
           title: _titleForType(_selectedType),
           filename: previewFilename,
           buildPreview: () => ref
@@ -70,7 +114,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         if (compact) {
           return Column(
             children: [
-              SizedBox(height: 356, child: sidebar),
+              SizedBox(height: 520, child: sidebar),
               const SizedBox(height: 12),
               Expanded(child: preview),
             ],
@@ -80,7 +124,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: 320, child: sidebar),
+            SizedBox(width: 340, child: sidebar),
             const SizedBox(width: 12),
             Expanded(child: preview),
           ],
@@ -94,6 +138,13 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     ProjectWorkspaceSnapshot snapshot,
     EditorGridSessionState gridSession,
   ) {
+    final brandName = _brandNameController.text.trim();
+    final tagline = _brandTaglineController.text.trim();
+    final hasCustomLogo = _brandLogoPath != null && _brandLogoPath!.isNotEmpty;
+    final effectiveShowDefaultLogo =
+        _showDefaultBrandLogo &&
+        (brandName.isNotEmpty || tagline.isNotEmpty || hasCustomLogo);
+
     return ExportPayload(
       bundle: snapshot.bundle,
       shots: snapshot.shots,
@@ -105,11 +156,62 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         for (final column in snapshot.customColumns)
           column.fieldKey: column.name,
       },
+      branding: ExportBranding(
+        brandName: brandName,
+        tagline: tagline,
+        showDefaultLogo: effectiveShowDefaultLogo,
+        logoPath: _brandLogoPath,
+      ),
       boardPreset: snapshot.boardPreset,
       planBoard: snapshot.planBoard,
       callSheet: snapshot.callSheet,
       documentType: type,
     );
+  }
+
+  Future<void> _pickBrandLogo() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [_imageTypeGroup],
+      confirmButtonText: '选择 Logo',
+    );
+    if (file == null || file.path.isEmpty) {
+      return;
+    }
+    setState(() {
+      _brandLogoPath = file.path;
+      _showDefaultBrandLogo = false;
+    });
+  }
+
+  void _handleBrandingChanged() {
+    final brandingCleared =
+        (_brandLogoPath == null || _brandLogoPath!.isEmpty) &&
+        _brandNameController.text.trim().isEmpty &&
+        _brandTaglineController.text.trim().isEmpty;
+
+    setState(() {
+      if (brandingCleared) {
+        _showDefaultBrandLogo = false;
+      }
+    });
+  }
+
+  void _clearBranding() {
+    setState(() {
+      _brandLogoPath = null;
+      _showDefaultBrandLogo = false;
+      _brandNameController.clear();
+      _brandTaglineController.clear();
+    });
+  }
+
+  void _resetBranding() {
+    setState(() {
+      _brandLogoPath = null;
+      _showDefaultBrandLogo = true;
+      _brandNameController.text = 'VisionDraft';
+      _brandTaglineController.text = '影视策划与前置统筹';
+    });
   }
 
   Future<void> _exportDocument(ExportDocumentType type) async {
@@ -275,12 +377,11 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     ProjectWorkspaceSnapshot snapshot,
   ) {
     return switch (type) {
-      ExportDocumentType.shotSheet =>
-        '${snapshot.shots.length} 镜头 · 按当前活动列布局导出',
+      ExportDocumentType.shotSheet => '${snapshot.shots.length} 镜头，按当前活动列布局导出',
       ExportDocumentType.shootingPlan =>
-        '${snapshot.planBoard.sections.length} 个区块 · 含未规划镜头',
+        '${snapshot.planBoard.sections.length} 个区块，含未规划镜头',
       ExportDocumentType.callSheet =>
-        '${snapshot.callSheet.sectionSummaries.length} 条摘要 · 现场执行稿',
+        '${snapshot.callSheet.sectionSummaries.length} 条摘要，现场执行稿',
     };
   }
 
@@ -303,11 +404,19 @@ class _ExportSidebar extends StatelessWidget {
     required this.snapshot,
     required this.selectedType,
     required this.lastSavedPath,
+    required this.brandNameController,
+    required this.brandTaglineController,
+    required this.brandLogoPath,
+    required this.showDefaultBrandLogo,
     required this.busyTypes,
     required this.onTypeSelected,
     required this.onGenerate,
     required this.onPrint,
     required this.onShare,
+    required this.onPickLogo,
+    required this.onClearBranding,
+    required this.onResetBranding,
+    required this.onBrandingChanged,
     required this.titleForType,
     required this.subtitleForType,
     required this.iconForType,
@@ -316,11 +425,19 @@ class _ExportSidebar extends StatelessWidget {
   final ProjectWorkspaceSnapshot snapshot;
   final ExportDocumentType selectedType;
   final String? lastSavedPath;
+  final TextEditingController brandNameController;
+  final TextEditingController brandTaglineController;
+  final String? brandLogoPath;
+  final bool showDefaultBrandLogo;
   final Set<ExportDocumentType> busyTypes;
   final ValueChanged<ExportDocumentType> onTypeSelected;
   final VoidCallback onGenerate;
   final VoidCallback onPrint;
   final VoidCallback onShare;
+  final Future<void> Function() onPickLogo;
+  final VoidCallback onClearBranding;
+  final VoidCallback onResetBranding;
+  final VoidCallback onBrandingChanged;
   final String Function(ExportDocumentType type) titleForType;
   final String Function(
     ExportDocumentType type,
@@ -396,6 +513,17 @@ class _ExportSidebar extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  _BrandingCard(
+                    logoPath: brandLogoPath,
+                    showDefaultLogo: showDefaultBrandLogo,
+                    brandNameController: brandNameController,
+                    brandTaglineController: brandTaglineController,
+                    onPickLogo: onPickLogo,
+                    onClear: onClearBranding,
+                    onReset: onResetBranding,
+                    onChanged: onBrandingChanged,
+                  ),
+                  const SizedBox(height: 16),
                   _InfoRow(label: '项目', value: snapshot.bundle.name),
                   _InfoRow(label: '镜头数', value: '${snapshot.shots.length}'),
                   _InfoRow(
@@ -421,11 +549,13 @@ class _ExportSidebar extends StatelessWidget {
 
 class _ExportPreviewPanel extends StatelessWidget {
   const _ExportPreviewPanel({
+    required this.previewKey,
     required this.title,
     required this.filename,
     required this.buildPreview,
   });
 
+  final String previewKey;
   final String title;
   final String filename;
   final Future<Uint8List> Function() buildPreview;
@@ -462,7 +592,7 @@ class _ExportPreviewPanel extends StatelessWidget {
               child: ColoredBox(
                 color: theme.colorScheme.surfaceContainerLowest,
                 child: PdfPreview(
-                  key: ValueKey(filename),
+                  key: ValueKey(previewKey),
                   build: (_) => buildPreview(),
                   pdfFileName: filename,
                   initialPageFormat: PdfPageFormat.a4,
@@ -581,6 +711,210 @@ class _PanelFrame extends StatelessWidget {
         border: Border.all(color: theme.dividerColor),
       ),
       child: Padding(padding: const EdgeInsets.all(16), child: child),
+    );
+  }
+}
+
+class _BrandingCard extends StatelessWidget {
+  const _BrandingCard({
+    required this.logoPath,
+    required this.showDefaultLogo,
+    required this.brandNameController,
+    required this.brandTaglineController,
+    required this.onPickLogo,
+    required this.onClear,
+    required this.onReset,
+    required this.onChanged,
+  });
+
+  final String? logoPath;
+  final bool showDefaultLogo;
+  final TextEditingController brandNameController;
+  final TextEditingController brandTaglineController;
+  final Future<void> Function() onPickLogo;
+  final VoidCallback onClear;
+  final VoidCallback onReset;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasCustomLogo = logoPath != null && logoPath!.isNotEmpty;
+    final showsAnyLogo = hasCustomLogo || showDefaultLogo;
+    final hasBrandName = brandNameController.text.trim().isNotEmpty;
+    final hasBrandTagline = brandTaglineController.text.trim().isNotEmpty;
+    final stateLabel = hasCustomLogo
+        ? '自定义品牌'
+        : showDefaultLogo
+        ? '默认品牌'
+        : '空白品牌';
+    final stateDescription = hasCustomLogo
+        ? '使用你的自定义 Logo，导出时会按当前品牌名称和文案显示。'
+        : showDefaultLogo
+        ? '使用 VisionDraft 默认图标，可继续修改名称和文案。'
+        : '当前不显示 Logo。名称和品牌文案也留空时，导出顶部会保持空白。';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '品牌区',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              stateLabel,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              stateDescription,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (showsAnyLogo) ...[
+                  _LogoPreview(
+                    logoPath: logoPath,
+                    showDefaultLogo: showDefaultLogo,
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        showsAnyLogo ? 'Logo 已启用' : 'Logo 已关闭',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: onPickLogo,
+                            icon: const Icon(Icons.image_outlined),
+                            label: const Text('选择 Logo'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: onClear,
+                            icon: const Icon(Icons.clear_rounded),
+                            label: const Text('清空'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: onReset,
+                            icon: const Icon(Icons.restart_alt_rounded),
+                            label: const Text('恢复默认'),
+                          ),
+                        ],
+                      ),
+                      if (!showsAnyLogo &&
+                          !hasBrandName &&
+                          !hasBrandTagline) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '当前导出顶部品牌区为空白。',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: brandNameController,
+              onChanged: (_) => onChanged(),
+              decoration: const InputDecoration(
+                labelText: '品牌名称',
+                hintText: 'VisionDraft',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: brandTaglineController,
+              onChanged: (_) => onChanged(),
+              decoration: const InputDecoration(
+                labelText: '品牌文案',
+                hintText: '影视策划与前置统筹',
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LogoPreview extends StatelessWidget {
+  const _LogoPreview({required this.logoPath, required this.showDefaultLogo});
+
+  final String? logoPath;
+  final bool showDefaultLogo;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = logoPath;
+    if (path != null && path.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.file(
+          File(path),
+          width: 54,
+          height: 54,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => const _DefaultLogoBox(),
+        ),
+      );
+    }
+
+    if (showDefaultLogo) {
+      return const _DefaultLogoBox();
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+class _DefaultLogoBox extends StatelessWidget {
+  const _DefaultLogoBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+        ),
+        child: Image.asset(
+          'assets/branding/default_logo.png',
+          width: 54,
+          height: 54,
+          fit: BoxFit.cover,
+        ),
+      ),
     );
   }
 }

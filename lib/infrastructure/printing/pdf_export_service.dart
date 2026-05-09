@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,14 +9,21 @@ import 'package:pdf/widgets.dart' as pw;
 import '../../features/project_workspace/domain/models/asset_ref.dart';
 import '../../features/project_workspace/domain/models/board_preset.dart';
 import '../../features/project_workspace/domain/models/export_payload.dart';
-import '../../features/project_workspace/domain/models/shot_record.dart';
 import '../../features/project_workspace/domain/models/shot_fields.dart';
+import '../../features/project_workspace/domain/models/shot_record.dart';
 
 class PdfExportService {
   const PdfExportService();
 
+  static const String _defaultLogoPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAHiSURBVFhH3dY9TgJBFAfw9RsMtVFvYKMiFmrCEdRGAyz4AcVeQE2Ml7CwEAW8BELQEhOREEvvYdwgWI3vDTOb2d3ZhZgZCl/yL2d//4HwFkPVnLT71vFbn2COhOQgWZ5Wn5itvsWOqBvEIRQfUkAfPkIB9fipgA8poAeHOHhIAfV4vv1DcVkBEYfowSE+XFJALz7k49eHj3B7/XjI7cePCwX0f+djxQFzfmoy+P/i8HDXepVFhhfebQO2XgIDq3eQ1iDwBqTJDLLCjvgHHh6KM9iH5ztdxIu49zHs5cNfvzQAY7qQJDvmH0CkBQTYhxvkNRD3FAjH+QDo/LGQxIWbL8E3/xPOByGOsu3mWzLb1U9jv9lTj/NBMAjfqX0ZiafvWwjZa/bU43xYCRcef6R4EfENFlpCNS6bwgehOIcxcZZdKKEV33q2DQCluFhCC44DYDII5lmr22TzpnPNjqgfQCwvillvAF6zyeJVg0RyDxj3rlA5ALpKcHzpsk6iZoUWmMtWMHpLIMzx5YtHEju4I/OpEolACVaAzJoaSwBurSJ+ViWxw3sSzZRF2MmMzhIL51WLo14cYCfTmbK+EoDSEp5bizjNVFpjCUCtIJjhNJPpkr4SgFpenMMMp5lIiSUM4xfhImnqhjb4gAAAAABJRU5ErkJggg==';
+
   Future<Uint8List> generate(ExportPayload payload) async {
     final theme = await _loadTheme();
+    final brandingLogo = await _loadBrandLogo(
+      payload.branding.logoPath,
+      fallbackToDefault: payload.branding.showDefaultLogo,
+    );
     final document = pw.Document(
       theme: theme,
       title: '${payload.bundle.name}-${_titleForType(payload.documentType)}',
@@ -24,11 +32,11 @@ class PdfExportService {
 
     switch (payload.documentType) {
       case ExportDocumentType.shotSheet:
-        await _buildShotSheet(document, payload);
+        await _buildShotSheet(document, payload, brandingLogo);
       case ExportDocumentType.shootingPlan:
-        _buildShootingPlan(document, payload);
+        _buildShootingPlan(document, payload, brandingLogo);
       case ExportDocumentType.callSheet:
-        _buildCallSheet(document, payload);
+        _buildCallSheet(document, payload, brandingLogo);
     }
 
     return document.save();
@@ -59,9 +67,27 @@ class PdfExportService {
     return pw.ThemeData.withFont();
   }
 
+  Future<pw.MemoryImage?> _loadBrandLogo(
+    String? path, {
+    required bool fallbackToDefault,
+  }) async {
+    final normalizedPath = path?.trim();
+    if (normalizedPath != null && normalizedPath.isNotEmpty) {
+      final file = File(normalizedPath);
+      if (await file.exists()) {
+        return pw.MemoryImage(await file.readAsBytes());
+      }
+    }
+    if (!fallbackToDefault) {
+      return null;
+    }
+    return pw.MemoryImage(base64Decode(_defaultLogoPngBase64));
+  }
+
   Future<void> _buildShotSheet(
     pw.Document document,
     ExportPayload payload,
+    pw.MemoryImage? brandingLogo,
   ) async {
     final sourceOrder = payload.effectiveFieldOrderKeys.isNotEmpty
         ? payload.effectiveFieldOrderKeys
@@ -124,8 +150,8 @@ class PdfExportService {
                 _pdfHeader(
                   title: _titleForType(payload.documentType),
                   projectName: payload.bundle.name,
-                  subtitle:
-                      '镜头 ${payload.shots.length} 条 · A4 横向单页 · ${_timestamp(DateTime.now())}',
+                  payload: payload,
+                  brandingLogo: brandingLogo,
                 ),
                 pw.SizedBox(height: 8),
                 pw.Table(
@@ -143,7 +169,11 @@ class PdfExportService {
     );
   }
 
-  void _buildShootingPlan(pw.Document document, ExportPayload payload) {
+  void _buildShootingPlan(
+    pw.Document document,
+    ExportPayload payload,
+    pw.MemoryImage? brandingLogo,
+  ) {
     final shotById = {for (final shot in payload.shots) shot.id: shot};
     final sections = payload.planBoard.sections;
 
@@ -156,8 +186,8 @@ class PdfExportService {
             _pdfHeader(
               title: _titleForType(payload.documentType),
               projectName: payload.bundle.name,
-              subtitle:
-                  '计划区块 ${sections.length} 个 · 未规划 ${payload.planBoard.unassignedShotIds.length} 个',
+              payload: payload,
+              brandingLogo: brandingLogo,
             ),
             pw.SizedBox(height: 12),
           ];
@@ -172,7 +202,7 @@ class PdfExportService {
                   borderRadius: const pw.BorderRadius.all(
                     pw.Radius.circular(6),
                   ),
-                  border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                  border: pw.Border.all(color: PdfColors.grey500, width: 0.7),
                 ),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -187,8 +217,8 @@ class PdfExportService {
                     pw.SizedBox(height: 8),
                     pw.Table(
                       border: pw.TableBorder.all(
-                        color: PdfColors.grey500,
-                        width: 0.5,
+                        color: PdfColors.grey700,
+                        width: 0.72,
                       ),
                       columnWidths: const {
                         0: pw.FixedColumnWidth(52),
@@ -222,7 +252,7 @@ class PdfExportService {
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                  border: pw.Border.all(color: PdfColors.grey500, width: 0.7),
                   borderRadius: const pw.BorderRadius.all(
                     pw.Radius.circular(6),
                   ),
@@ -276,7 +306,11 @@ class PdfExportService {
     );
   }
 
-  void _buildCallSheet(pw.Document document, ExportPayload payload) {
+  void _buildCallSheet(
+    pw.Document document,
+    ExportPayload payload,
+    pw.MemoryImage? brandingLogo,
+  ) {
     final groupedSections = payload.planBoard.sections
         .map(
           (section) => (
@@ -297,8 +331,8 @@ class PdfExportService {
             _pdfHeader(
               title: _titleForType(payload.documentType),
               projectName: payload.bundle.name,
-              subtitle:
-                  '区块 ${groupedSections.length} 个 · 镜头 ${payload.shots.length} 个',
+              payload: payload,
+              brandingLogo: brandingLogo,
             ),
             pw.SizedBox(height: 10),
             pw.Container(
@@ -343,7 +377,7 @@ class PdfExportService {
                 margin: const pw.EdgeInsets.only(bottom: 12),
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                  border: pw.Border.all(color: PdfColors.grey500, width: 0.7),
                   borderRadius: const pw.BorderRadius.all(
                     pw.Radius.circular(6),
                   ),
@@ -366,8 +400,8 @@ class PdfExportService {
                     pw.SizedBox(height: 8),
                     pw.Table(
                       border: pw.TableBorder.all(
-                        color: PdfColors.grey500,
-                        width: 0.5,
+                        color: PdfColors.grey700,
+                        width: 0.72,
                       ),
                       columnWidths: const {
                         0: pw.FixedColumnWidth(54),
@@ -490,17 +524,23 @@ class PdfExportService {
   pw.Widget _pdfHeader({
     required String title,
     required String projectName,
-    required String subtitle,
+    required ExportPayload payload,
+    required pw.MemoryImage? brandingLogo,
   }) {
+    final brandName = payload.branding.brandName.trim();
+    final tagline = payload.branding.tagline.trim();
+    final hasBrandBlock =
+        brandingLogo != null || brandName.isNotEmpty || tagline.isNotEmpty;
+
     return pw.Container(
       padding: const pw.EdgeInsets.only(bottom: 10),
       decoration: const pw.BoxDecoration(
         border: pw.Border(
-          bottom: pw.BorderSide(color: PdfColors.grey500, width: 0.8),
+          bottom: pw.BorderSide(color: PdfColors.grey700, width: 0.9),
         ),
       ),
       child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
           pw.Expanded(
             child: pw.Column(
@@ -518,12 +558,48 @@ class PdfExportService {
               ],
             ),
           ),
-          pw.SizedBox(width: 16),
-          pw.Text(
-            subtitle,
-            style: const pw.TextStyle(fontSize: 9),
-            textAlign: pw.TextAlign.right,
-          ),
+          if (hasBrandBlock) ...[
+            pw.SizedBox(width: 16),
+            pw.Row(
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                if (brandingLogo != null) ...[
+                  pw.ClipRRect(
+                    horizontalRadius: 7,
+                    verticalRadius: 7,
+                    child: pw.Image(
+                      brandingLogo,
+                      width: 28,
+                      height: 28,
+                      fit: pw.BoxFit.cover,
+                    ),
+                  ),
+                  pw.SizedBox(width: 10),
+                ],
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    if (brandName.isNotEmpty)
+                      pw.Text(
+                        brandName,
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    if (brandName.isNotEmpty && tagline.isNotEmpty)
+                      pw.SizedBox(height: 2),
+                    if (tagline.isNotEmpty)
+                      pw.Text(
+                        tagline,
+                        style: const pw.TextStyle(fontSize: 8.5),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -618,7 +694,7 @@ class PdfExportService {
       child: pw.Container(
         decoration: pw.BoxDecoration(
           color: PdfColors.grey200,
-          border: pw.Border.all(color: PdfColors.grey500, width: 0.4),
+          border: pw.Border.all(color: PdfColors.grey700, width: 0.65),
           borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
         ),
         alignment: pw.Alignment.center,
@@ -702,12 +778,12 @@ class PdfExportService {
 
   pw.TableBorder _shotSheetTableBorder() {
     return const pw.TableBorder(
-      top: pw.BorderSide(color: PdfColors.grey700, width: 0.8),
-      bottom: pw.BorderSide(color: PdfColors.grey700, width: 0.8),
-      left: pw.BorderSide(color: PdfColors.grey700, width: 0.8),
-      right: pw.BorderSide(color: PdfColors.grey700, width: 0.8),
-      horizontalInside: pw.BorderSide(color: PdfColors.grey500, width: 0.45),
-      verticalInside: pw.BorderSide(color: PdfColors.grey700, width: 0.8),
+      top: pw.BorderSide(color: PdfColors.grey800, width: 0.95),
+      bottom: pw.BorderSide(color: PdfColors.grey800, width: 0.95),
+      left: pw.BorderSide(color: PdfColors.grey800, width: 0.95),
+      right: pw.BorderSide(color: PdfColors.grey800, width: 0.95),
+      horizontalInside: pw.BorderSide(color: PdfColors.grey700, width: 0.72),
+      verticalInside: pw.BorderSide(color: PdfColors.grey800, width: 0.95),
     );
   }
 }

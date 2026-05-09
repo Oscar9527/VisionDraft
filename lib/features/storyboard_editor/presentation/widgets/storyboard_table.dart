@@ -176,6 +176,8 @@ class _StoryboardTableState extends State<StoryboardTable> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
         final visibleFields = _buildVisibleFieldKeys();
@@ -202,15 +204,18 @@ class _StoryboardTableState extends State<StoryboardTable> {
             },
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
+                color: isDark ? scheme.surfaceContainerLow : scheme.surface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Theme.of(context).dividerColor),
               ),
               child: Column(
                 children: [
                   Container(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.22),
+                    color: isDark
+                        ? scheme.surfaceContainerHighest.withValues(alpha: 0.34)
+                        : scheme.surfaceContainerHighest.withValues(
+                            alpha: 0.22,
+                          ),
                     child: Row(
                       children: [
                         _LeadingHeaderCell(
@@ -299,12 +304,12 @@ class _StoryboardTableState extends State<StoryboardTable> {
                           decoration: BoxDecoration(
                             color: selected
                                 ? Theme.of(context).colorScheme.primaryContainer
-                                      .withValues(alpha: 0.14)
+                                      .withValues(alpha: isDark ? 0.22 : 0.14)
                                 : index.isOdd
                                 ? Theme.of(context)
                                       .colorScheme
                                       .surfaceContainerHighest
-                                      .withValues(alpha: 0.06)
+                                      .withValues(alpha: isDark ? 0.16 : 0.06)
                                 : Colors.transparent,
                             border: Border(
                               top: BorderSide(
@@ -490,12 +495,19 @@ class _StoryboardTableState extends State<StoryboardTable> {
             width: 26,
             height: 26,
             decoration: BoxDecoration(
-              color: Theme.of(
-                context,
-              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.32),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest
+                  .withValues(
+                    alpha: Theme.of(context).brightness == Brightness.dark
+                        ? 0.5
+                        : 0.32,
+                  ),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.drag_indicator_rounded, size: 15),
+            child: Icon(
+              Icons.drag_indicator_rounded,
+              size: 15,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ),
@@ -942,7 +954,11 @@ class _HeaderCellState extends State<_HeaderCell> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHigh
+                              : Theme.of(context).colorScheme.surface,
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
                             color: Theme.of(context).colorScheme.primary,
@@ -1084,6 +1100,7 @@ class _HeaderCellState extends State<_HeaderCell> {
               icon: Icon(
                 Icons.more_horiz_rounded,
                 size: math.max(16, 17 * widget.uiScale),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -1128,9 +1145,12 @@ class _AddColumnHeaderCell extends StatelessWidget {
               width: 26,
               height: 26,
               decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest
+                    .withValues(
+                      alpha: Theme.of(context).brightness == Brightness.dark
+                          ? 0.42
+                          : 0.28,
+                    ),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
                   color: Theme.of(context).dividerColor.withValues(alpha: 0.72),
