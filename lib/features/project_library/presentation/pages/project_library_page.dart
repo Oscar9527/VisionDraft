@@ -462,6 +462,9 @@ class _CreateProjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return SurfaceCard(
       child: SizedBox.expand(
         child: InkWell(
@@ -474,25 +477,27 @@ class _CreateProjectCard extends StatelessWidget {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.primaryContainer.withValues(alpha: 0.6),
+                  color: scheme.primaryContainer.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   Icons.add_rounded,
                   size: 26,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: scheme.primary,
                 ),
               ),
-              const SizedBox(height: 16),
-              Text('新建项目', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(
-                '创建新的 VisionDraft 本地项目，下一步会先让你选择保存位置。',
-                style: Theme.of(context).textTheme.bodyMedium,
+              const SizedBox(height: 12),
+              Text('新建项目', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 6),
+              Expanded(
+                child: Text(
+                  '创建新的 VisionDraft 本地项目，下一步会先让你选择保存位置。',
+                  style: theme.textTheme.bodyMedium,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton.icon(
@@ -555,9 +560,16 @@ class _EmptyActionCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(title, style: theme.textTheme.titleLarge),
-          const SizedBox(height: 8),
-          Text(description, style: theme.textTheme.bodyMedium),
-          const Spacer(),
+          const SizedBox(height: 6),
+          Expanded(
+            child: Text(
+              description,
+              style: theme.textTheme.bodyMedium,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(height: 12),
           if (primary)
             FilledButton.icon(
               onPressed: onPressed,
@@ -612,42 +624,6 @@ class _EmptyInfoCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.36),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: RichText(
-          text: TextSpan(
-            style: Theme.of(context).textTheme.bodyMedium,
-            children: [
-              TextSpan(
-                text: '$label  ',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              TextSpan(
-                text: value,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

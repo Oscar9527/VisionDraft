@@ -184,10 +184,12 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   }
 
   void _handleBrandingChanged() {
+    final brandNameCleared = _brandNameController.text.trim().isEmpty;
+    final taglineCleared = _brandTaglineController.text.trim().isEmpty;
     final brandingCleared =
         (_brandLogoPath == null || _brandLogoPath!.isEmpty) &&
-        _brandNameController.text.trim().isEmpty &&
-        _brandTaglineController.text.trim().isEmpty;
+        brandNameCleared &&
+        taglineCleared;
 
     setState(() {
       if (brandingCleared) {
