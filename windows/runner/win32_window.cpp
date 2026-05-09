@@ -124,6 +124,7 @@ bool Win32Window::Create(const std::wstring& title,
                          const Point& origin,
                          const Size& size) {
   Destroy();
+  preferred_size_ = size;
 
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
@@ -145,6 +146,7 @@ bool Win32Window::Create(const std::wstring& title,
   }
 
   UpdateTheme(window);
+  EnsureVisibleOnCurrentMonitor();
 
   return OnCreate();
 }
@@ -285,4 +287,56 @@ void Win32Window::UpdateTheme(HWND const window) {
     DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
                           &enable_dark_mode, sizeof(enable_dark_mode));
   }
+}
+
+void Win32Window::EnsureVisibleOnCurrentMonitor() {
+  if (!window_handle_) {
+    return;
+  }
+
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(WINDOWPLACEMENT);
+  if (GetWindowPlacement(window_handle_, &placement)) {
+    placement.showCmd = SW_SHOWNORMAL;
+    SetWindowPlacement(window_handle_, &placement);
+  }
+
+  RECT window_rect{};
+  if (!GetWindowRect(window_handle_, &window_rect)) {
+    return;
+  }
+
+  const LONG width = std::max<LONG>(preferred_size_.width, 960);
+  const LONG height = std::max<LONG>(preferred_size_.height, 720);
+
+  HMONITOR monitor =
+      MonitorFromWindow(window_handle_, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{};
+  monitor_info.cbSize = sizeof(MONITORINFO);
+  if (!GetMonitorInfo(monitor, &monitor_info)) {
+    return;
+  }
+
+  const RECT work = monitor_info.rcWork;
+  const LONG work_width = work.right - work.left;
+  const LONG work_height = work.bottom - work.top;
+
+  const bool offscreen =
+      window_rect.right <= work.left || window_rect.left >= work.right ||
+      window_rect.bottom <= work.top || window_rect.top >= work.bottom ||
+      (window_rect.right - window_rect.left) < 400 ||
+      (window_rect.bottom - window_rect.top) < 300;
+
+  if (!offscreen) {
+    return;
+  }
+
+  const LONG target_width = std::min(width, work_width - 80);
+  const LONG target_height = std::min(height, work_height - 80);
+  const LONG target_left = work.left + std::max<LONG>((work_width - target_width) / 2, 20);
+  const LONG target_top = work.top + std::max<LONG>((work_height - target_height) / 2, 20);
+
+  SetWindowPos(
+      window_handle_, nullptr, target_left, target_top, target_width,
+      target_height, SWP_NOZORDER | SWP_NOACTIVATE);
 }

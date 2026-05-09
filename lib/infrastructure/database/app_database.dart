@@ -166,6 +166,9 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+        beforeOpen: (details) async {
+          await _repairLegacyDateTimeValues();
+        },
         onCreate: (migrator) async {
           await migrator.createAll();
         },
@@ -188,7 +191,7 @@ class AppDatabase extends _$AppDatabase {
               "UPDATE board_presets SET shot_number_mode = 'custom' WHERE shot_number_mode IS NULL OR shot_number_mode = ''",
             );
             await customStatement(
-              "UPDATE column_presets SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL",
+              "UPDATE column_presets SET updated_at = CAST(strftime('%s','now') AS INTEGER) WHERE updated_at IS NULL",
             );
           }
           if (from == 2) {
@@ -199,4 +202,12 @@ class AppDatabase extends _$AppDatabase {
           }
         },
       );
+
+  Future<void> _repairLegacyDateTimeValues() async {
+    await customStatement("""
+      UPDATE column_presets
+      SET updated_at = CAST(strftime('%s', updated_at) AS INTEGER)
+      WHERE typeof(updated_at) = 'text' AND updated_at IS NOT NULL AND updated_at != ''
+    """);
+  }
 }

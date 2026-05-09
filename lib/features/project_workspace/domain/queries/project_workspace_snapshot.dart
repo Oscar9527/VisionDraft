@@ -19,6 +19,7 @@ class ProjectWorkspaceSnapshot {
     required this.planBoard,
     required this.callSheet,
     this.isLoading = false,
+    this.errorMessage,
   });
 
   final ProjectBundle bundle;
@@ -31,6 +32,7 @@ class ProjectWorkspaceSnapshot {
   final PlanBoard planBoard;
   final CallSheet callSheet;
   final bool isLoading;
+  final String? errorMessage;
 
   factory ProjectWorkspaceSnapshot.empty(String projectId) {
     final now = DateTime.now();
@@ -71,6 +73,8 @@ class ProjectWorkspaceSnapshot {
     PlanBoard? planBoard,
     CallSheet? callSheet,
     bool? isLoading,
+    String? errorMessage,
+    bool clearError = false,
   }) {
     return ProjectWorkspaceSnapshot(
       bundle: bundle ?? this.bundle,
@@ -84,6 +88,7 @@ class ProjectWorkspaceSnapshot {
       planBoard: planBoard ?? this.planBoard,
       callSheet: callSheet ?? this.callSheet,
       isLoading: isLoading ?? this.isLoading,
+      errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
     );
   }
 }

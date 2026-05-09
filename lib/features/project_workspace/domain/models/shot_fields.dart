@@ -107,7 +107,7 @@ extension ShotFieldKeyX on ShotFieldKey {
         ShotFieldKey.referenceImage => '参考图',
         ShotFieldKey.shotSize => '景别',
         ShotFieldKey.durationSec => '时长(秒)',
-        ShotFieldKey.content => '画面内容',
+        ShotFieldKey.content => '内容',
         ShotFieldKey.dialogue => '台词',
         ShotFieldKey.notes => '备注',
         ShotFieldKey.sceneExpectation => '场景预期',

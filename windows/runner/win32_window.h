@@ -89,6 +89,7 @@ class Win32Window {
 
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
+  void EnsureVisibleOnCurrentMonitor();
 
   bool quit_on_close_ = false;
 
@@ -97,6 +98,8 @@ class Win32Window {
 
   // window handle for hosted content.
   HWND child_content_ = nullptr;
+
+  Size preferred_size_ = Size(1280, 720);
 };
 
 #endif  // RUNNER_WIN32_WINDOW_H_

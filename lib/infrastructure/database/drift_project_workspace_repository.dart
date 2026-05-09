@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:collection/collection.dart';
@@ -44,7 +44,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     final database = db.AppDatabase(File(bundle.databasePath));
     try {
       await database.transaction(() async {
-        await database.into(database.projects).insert(
+        await database
+            .into(database.projects)
+            .insert(
               db.ProjectsCompanion.insert(
                 id: bundle.id,
                 name: bundle.name,
@@ -53,22 +55,22 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
               ),
             );
 
-        await database.into(database.columnPresets).insert(
+        await database
+            .into(database.columnPresets)
+            .insert(
               db.ColumnPresetsCompanion.insert(
                 id: 'active',
                 projectId: bundle.id,
                 name: '当前布局',
                 kind: const Value('active'),
-                visibleFieldsJson: jsonEncode(
-                  <String>[
-                    'shotNo',
-                    'frameImage',
-                    'shotSize',
-                    'durationSec',
-                    'content',
-                    'notes',
-                  ],
-                ),
+                visibleFieldsJson: jsonEncode(<String>[
+                  'shotNo',
+                  'frameImage',
+                  'shotSize',
+                  'durationSec',
+                  'content',
+                  'notes',
+                ]),
                 fieldOrderJson: jsonEncode(
                   fixedShotFields.map((field) => field.storageKey).toList(),
                 ),
@@ -76,14 +78,17 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
               ),
             );
 
-        await database.into(database.boardPresets).insert(
+        await database
+            .into(database.boardPresets)
+            .insert(
               db.BoardPresetsCompanion.insert(
                 id: 'default',
                 projectId: bundle.id,
                 name: board_domain.BoardPreset.initial().name,
                 aspectRatio: board_domain.BoardPreset.initial().aspectRatio,
                 fitMode: board_domain.BoardPreset.initial().fitMode.name,
-                textAlignMode: board_domain.BoardPreset.initial().textAlignMode.name,
+                textAlignMode:
+                    board_domain.BoardPreset.initial().textAlignMode.name,
                 textScaleMode: Value(
                   board_domain.BoardPreset.initial().textScaleMode.name,
                 ),
@@ -99,7 +104,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
               ),
             );
 
-        await database.into(database.callSheets).insert(
+        await database
+            .into(database.callSheets)
+            .insert(
               db.CallSheetsCompanion.insert(
                 id: 'default',
                 projectId: bundle.id,
@@ -108,7 +115,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
               ),
             );
 
-        await database.into(database.planSections).insert(
+        await database
+            .into(database.planSections)
+            .insert(
               db.PlanSectionsCompanion.insert(
                 id: 'default-section',
                 projectId: bundle.id,
@@ -118,7 +127,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
             );
 
         for (var index = 0; index < 3; index++) {
-          await database.into(database.shots).insert(
+          await database
+              .into(database.shots)
+              .insert(
                 db.ShotsCompanion.insert(
                   id: _uuid.v4(),
                   projectId: bundle.id,
@@ -147,9 +158,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   Future<ProjectBundle> _resolveBundle(String projectId) async {
     final indexDatabase = await indexDatabaseFactory();
     try {
-      final row = await (indexDatabase.select(indexDatabase.recentProjects)
-            ..where((tbl) => tbl.id.equals(projectId)))
-          .getSingleOrNull();
+      final row = await (indexDatabase.select(
+        indexDatabase.recentProjects,
+      )..where((tbl) => tbl.id.equals(projectId))).getSingleOrNull();
       if (row == null) {
         throw StateError('Project $projectId not found in index database');
       }
@@ -173,17 +184,22 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
-  Future<ProjectBundle> loadBundle(String projectId) => _resolveBundle(projectId);
+  Future<ProjectBundle> loadBundle(String projectId) =>
+      _resolveBundle(projectId);
 
   @override
   Future<List<ShotRecord>> loadShots(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
-      final shotRows = await (database.select(database.shots)
-            ..where((tbl) => tbl.projectId.equals(projectId))
-            ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
-          .get();
+      final shotRows =
+          await (database.select(database.shots)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
+              .get();
       final assetRows = await database.select(database.shotAssets).get();
-      final customColumns = await loadCustomColumns(projectId);
+      final customColumns = await _loadSanitizedCustomColumnsWithDb(
+        database,
+        projectId,
+      );
       final valueRows = await database.select(database.shotCustomValues).get();
       final assetsByShotId = <String, List<db.ShotAsset>>{};
       for (final asset in assetRows) {
@@ -191,14 +207,16 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
       }
       final valuesByShotId = <String, Map<String, CustomFieldValue>>{};
       for (final value in valueRows) {
-        valuesByShotId.putIfAbsent(value.shotId, () => {})[value.columnId] =
-            CustomFieldValue(
-              shotId: value.shotId,
-              columnId: value.columnId,
-              textValue: value.textValue,
-              numberValue: value.numberValue,
-              enumValue: value.enumValue,
-            );
+        valuesByShotId.putIfAbsent(
+          value.shotId,
+          () => {},
+        )[value.columnId] = CustomFieldValue(
+          shotId: value.shotId,
+          columnId: value.columnId,
+          textValue: value.textValue,
+          numberValue: value.numberValue,
+          enumValue: value.enumValue,
+        );
       }
       return shotRows
           .map(
@@ -215,19 +233,60 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
+  Future<ShotRecord> loadShot(String projectId, String shotId) {
+    return _withDb(projectId, (database, bundle) async {
+      return _loadShotRecordById(database, bundle, shotId);
+    });
+  }
+
+  @override
   Future<column_domain.ColumnPreset> loadColumnPreset(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
-      final preset = await (database.select(database.columnPresets)
-            ..where((tbl) => tbl.projectId.equals(projectId) & tbl.kind.equals('active'))
-            ..limit(1))
-          .getSingle();
-      final visibleFieldKeys =
-          (jsonDecode(preset.visibleFieldsJson) as List<dynamic>).cast<String>();
-      final fieldOrderKeys =
-          (jsonDecode(preset.fieldOrderJson) as List<dynamic>).cast<String>();
+      final customColumns = await _loadSanitizedCustomColumnsWithDb(
+        database,
+        projectId,
+      );
+      final validFieldKeys = _buildValidFieldKeys(customColumns);
+      final preset =
+          await (database.select(database.columnPresets)
+                ..where(
+                  (tbl) =>
+                      tbl.projectId.equals(projectId) &
+                      tbl.kind.equals('active'),
+                )
+                ..limit(1))
+              .getSingle();
+      final visibleFieldKeys = _sanitizeVisibleFieldKeys(
+        (jsonDecode(preset.visibleFieldsJson) as List<dynamic>).cast<String>(),
+        validFieldKeys,
+      );
+      final fieldOrderKeys = _sanitizeFieldOrderKeys(
+        (jsonDecode(preset.fieldOrderJson) as List<dynamic>).cast<String>(),
+        validFieldKeys,
+      );
+      if (preset.name != '当前布局' ||
+          visibleFieldKeys.join('|') !=
+              (jsonDecode(preset.visibleFieldsJson) as List<dynamic>)
+                  .cast<String>()
+                  .join('|') ||
+          fieldOrderKeys.join('|') !=
+              (jsonDecode(preset.fieldOrderJson) as List<dynamic>)
+                  .cast<String>()
+                  .join('|')) {
+        await (database.update(
+          database.columnPresets,
+        )..where((tbl) => tbl.id.equals(preset.id))).write(
+          db.ColumnPresetsCompanion(
+            name: const Value('当前布局'),
+            visibleFieldsJson: Value(jsonEncode(visibleFieldKeys)),
+            fieldOrderJson: Value(jsonEncode(fieldOrderKeys)),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+      }
       return column_domain.ColumnPreset(
         id: preset.id,
-        name: preset.name,
+        name: '当前布局',
         kind: column_domain.ColumnPresetKind.active,
         visibleFieldKeys: visibleFieldKeys,
         fieldOrderKeys: fieldOrderKeys,
@@ -239,20 +298,36 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   @override
   Future<List<ColumnTemplate>> loadColumnTemplates(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
-      final rows = await (database.select(database.columnPresets)
-            ..where((tbl) => tbl.projectId.equals(projectId) & tbl.kind.equals('template'))
-            ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]))
-          .get();
+      final customColumns = await _loadSanitizedCustomColumnsWithDb(
+        database,
+        projectId,
+      );
+      final validFieldKeys = _buildValidFieldKeys(customColumns);
+      final rows =
+          await (database.select(database.columnPresets)
+                ..where(
+                  (tbl) =>
+                      tbl.projectId.equals(projectId) &
+                      tbl.kind.equals('template'),
+                )
+                ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]))
+              .get();
       return rows
           .map(
             (row) => ColumnTemplate(
               id: row.id,
               projectId: row.projectId,
               name: row.name,
-              visibleFieldKeys:
-                  (jsonDecode(row.visibleFieldsJson) as List<dynamic>).cast<String>(),
-              fieldOrderKeys:
-                  (jsonDecode(row.fieldOrderJson) as List<dynamic>).cast<String>(),
+              visibleFieldKeys: _sanitizeVisibleFieldKeys(
+                (jsonDecode(row.visibleFieldsJson) as List<dynamic>)
+                    .cast<String>(),
+                validFieldKeys,
+              ),
+              fieldOrderKeys: _sanitizeFieldOrderKeys(
+                (jsonDecode(row.fieldOrderJson) as List<dynamic>)
+                    .cast<String>(),
+                validFieldKeys,
+              ),
               updatedAt: row.updatedAt ?? bundle.updatedAt,
             ),
           )
@@ -261,29 +336,11 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
-  Future<List<CustomColumnDefinition>> loadCustomColumns(String projectId) async {
+  Future<List<CustomColumnDefinition>> loadCustomColumns(
+    String projectId,
+  ) async {
     return _withDb(projectId, (database, bundle) async {
-      final rows = await (database.select(database.customColumns)
-            ..where((tbl) => tbl.projectId.equals(projectId))
-            ..orderBy([(tbl) => OrderingTerm.asc(tbl.createdAt)]))
-          .get();
-      return rows
-          .map(
-            (row) => CustomColumnDefinition(
-              id: row.id,
-              projectId: row.projectId,
-              name: row.name,
-              type: CustomColumnType.values.byName(row.type),
-              enumSource: row.enumSourceId == null
-                  ? null
-                  : BuiltInEnumSource.values.byName(row.enumSourceId!),
-              customOptions:
-                  (jsonDecode(row.customOptionsJson) as List<dynamic>).cast<String>(),
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-            ),
-          )
-          .toList();
+      return _loadSanitizedCustomColumnsWithDb(database, projectId);
     });
   }
 
@@ -297,14 +354,16 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
-  Future<Map<String, Map<String, CustomFieldValue>>> loadCustomFieldValuesByShot(
-    String projectId,
-  ) async {
+  Future<Map<String, Map<String, CustomFieldValue>>>
+  loadCustomFieldValuesByShot(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
       final rows = await database.select(database.shotCustomValues).get();
       final result = <String, Map<String, CustomFieldValue>>{};
       for (final row in rows) {
-        result.putIfAbsent(row.shotId, () => {})[row.columnId] = CustomFieldValue(
+        result.putIfAbsent(
+          row.shotId,
+          () => {},
+        )[row.columnId] = CustomFieldValue(
           shotId: row.shotId,
           columnId: row.columnId,
           textValue: row.textValue,
@@ -319,25 +378,30 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   @override
   Future<board_domain.BoardPreset> loadBoardPreset(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
-      final preset = await (database.select(database.boardPresets)
-            ..where((tbl) => tbl.projectId.equals(projectId))
-            ..limit(1))
-          .getSingle();
+      final preset =
+          await (database.select(database.boardPresets)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..limit(1))
+              .getSingle();
       return board_domain.BoardPreset(
         id: preset.id,
         name: preset.name,
         aspectRatio: preset.aspectRatio,
         fitMode: board_domain.ImageFitMode.values.byName(preset.fitMode),
-        textAlignMode:
-            board_domain.TextAlignMode.values.byName(preset.textAlignMode),
-        textScaleMode:
-            board_domain.TextScaleMode.values.byName(preset.textScaleMode),
-        shotNumberMode:
-            board_domain.ShotNumberMode.values.byName(preset.shotNumberMode),
-        primaryFields:
-            (jsonDecode(preset.primaryFieldsJson) as List<dynamic>).cast<String>(),
+        textAlignMode: board_domain.TextAlignMode.values.byName(
+          preset.textAlignMode,
+        ),
+        textScaleMode: board_domain.TextScaleMode.values.byName(
+          preset.textScaleMode,
+        ),
+        shotNumberMode: board_domain.ShotNumberMode.values.byName(
+          preset.shotNumberMode,
+        ),
+        primaryFields: (jsonDecode(preset.primaryFieldsJson) as List<dynamic>)
+            .cast<String>(),
         secondaryFields:
-            (jsonDecode(preset.secondaryFieldsJson) as List<dynamic>).cast<String>(),
+            (jsonDecode(preset.secondaryFieldsJson) as List<dynamic>)
+                .cast<String>(),
       );
     });
   }
@@ -345,15 +409,17 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   @override
   Future<plan_domain.PlanBoard> loadPlanBoard(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
-      final sections = await (database.select(database.planSections)
-            ..where((tbl) => tbl.projectId.equals(projectId))
-            ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
-          .get();
+      final sections =
+          await (database.select(database.planSections)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
+              .get();
       final assignments = await database.select(database.planAssignments).get();
-      final shots = await (database.select(database.shots)
-            ..where((tbl) => tbl.projectId.equals(projectId))
-            ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
-          .get();
+      final shots =
+          await (database.select(database.shots)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
+              .get();
       final assignedShotIds = assignments.map((item) => item.shotId).toSet();
 
       return plan_domain.PlanBoard(
@@ -379,16 +445,26 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   @override
   Future<call_domain.CallSheet> loadCallSheet(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
-      final row = await (database.select(database.callSheets)
-            ..where((tbl) => tbl.projectId.equals(projectId))
-            ..limit(1))
-          .getSingle();
+      final row =
+          await (database.select(database.callSheets)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..limit(1))
+              .getSingle();
       return call_domain.CallSheet(
         id: row.id,
         title: row.title,
         sectionSummaries:
-            (jsonDecode(row.sectionSummariesJson) as List<dynamic>).cast<String>(),
+            (jsonDecode(row.sectionSummariesJson) as List<dynamic>)
+                .cast<String>(),
       );
+    });
+  }
+
+  @override
+  Future<void> compactProject(String projectId) async {
+    await _withDb(projectId, (database, bundle) async {
+      await database.customStatement('PRAGMA wal_checkpoint(FULL)');
+      await database.customStatement('VACUUM');
     });
   }
 
@@ -411,25 +487,28 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         );
       }
 
-      final row = seedShot ??
+      final row =
+          seedShot ??
           ShotRecord(
             id: shotId,
             orderIndex: orderIndex,
             shotNo: '${shotCount + 1}',
-            shotSize: '涓櫙',
+            shotSize: '中景',
             durationSec: 0,
             content: '',
             dialogue: '',
             notes: '',
             sceneExpectation: '',
             audio: '',
-            cameraAngle: '骞宠',
-            cameraMove: '鍥哄畾',
-            cameraRig: '鎵嬫寔',
+            cameraAngle: '平视',
+            cameraMove: '固定',
+            cameraRig: '手持',
             focalLength: '35mm',
           );
 
-      await database.into(database.shots).insert(
+      await database
+          .into(database.shots)
+          .insert(
             db.ShotsCompanion.insert(
               id: row.id,
               projectId: projectId,
@@ -477,17 +556,18 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   Future<void> deleteShot(String projectId, String shotId) async {
     await _withDb(projectId, (database, bundle) async {
       await database.transaction(() async {
-        await (database.delete(database.shotAssets)
-              ..where((tbl) => tbl.shotId.equals(shotId)))
-            .go();
-        await (database.delete(database.shotCustomValues)
-              ..where((tbl) => tbl.shotId.equals(shotId)))
-            .go();
-        await (database.delete(database.planAssignments)
-              ..where((tbl) => tbl.shotId.equals(shotId)))
-            .go();
-        await (database.delete(database.shots)..where((tbl) => tbl.id.equals(shotId)))
-            .go();
+        await (database.delete(
+          database.shotAssets,
+        )..where((tbl) => tbl.shotId.equals(shotId))).go();
+        await (database.delete(
+          database.shotCustomValues,
+        )..where((tbl) => tbl.shotId.equals(shotId))).go();
+        await (database.delete(
+          database.planAssignments,
+        )..where((tbl) => tbl.shotId.equals(shotId))).go();
+        await (database.delete(
+          database.shots,
+        )..where((tbl) => tbl.id.equals(shotId))).go();
         await _normalizeShotOrders(database, projectId);
       });
       await _touchProject(database, projectId);
@@ -558,7 +638,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
             await _updateShotRow(
               database,
               shotId,
-              db.ShotsCompanion(sceneExpectation: Value((value ?? '') as String)),
+              db.ShotsCompanion(
+                sceneExpectation: Value((value ?? '') as String),
+              ),
             );
             break;
           case 'audio':
@@ -631,21 +713,21 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
           case 'frameImage':
           case 'referenceImage':
             if (value == null) {
-              await (database.delete(database.shotAssets)
-                    ..where(
-                      (tbl) =>
-                          tbl.shotId.equals(shotId) & tbl.fieldKey.equals(fieldKey),
-                    ))
+              await (database.delete(database.shotAssets)..where(
+                    (tbl) =>
+                        tbl.shotId.equals(shotId) &
+                        tbl.fieldKey.equals(fieldKey),
+                  ))
                   .go();
             } else {
               final payload = switch (value) {
                 AssetRefPayload data => data.toAssetRef(),
                 AssetRef data => data,
                 _ => throw ArgumentError.value(
-                    value,
-                    'value',
-                    'Unsupported asset payload for $fieldKey',
-                  ),
+                  value,
+                  'value',
+                  'Unsupported asset payload for $fieldKey',
+                ),
               };
               await _upsertAsset(
                 database,
@@ -666,7 +748,11 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
                 value: value,
               );
             } else {
-              throw ArgumentError.value(fieldKey, 'fieldKey', 'Unsupported field');
+              throw ArgumentError.value(
+                fieldKey,
+                'fieldKey',
+                'Unsupported field',
+              );
             }
         }
       });
@@ -683,21 +769,25 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     required Object? value,
   }) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.delete(database.shotCustomValues)
-            ..where((tbl) => tbl.shotId.equals(shotId) & tbl.columnId.equals(columnId)))
+      await (database.delete(database.shotCustomValues)..where(
+            (tbl) => tbl.shotId.equals(shotId) & tbl.columnId.equals(columnId),
+          ))
           .go();
       if (value == null) {
         return;
       }
-      final customColumns = await loadCustomColumns(projectId);
+      final customColumns = await _loadSanitizedCustomColumnsWithDb(
+        database,
+        projectId,
+      );
       final column = customColumns.firstWhere((item) => item.id == columnId);
       if (column.type == CustomColumnType.singleSelect && value is String) {
         final nextValue = value.trim();
         if (nextValue.isNotEmpty && !column.options.contains(nextValue)) {
           final nextCustomOptions = [...column.customOptions, nextValue];
-          await (database.update(database.customColumns)
-                ..where((tbl) => tbl.id.equals(columnId)))
-              .write(
+          await (database.update(
+            database.customColumns,
+          )..where((tbl) => tbl.id.equals(columnId))).write(
             db.CustomColumnsCompanion(
               customOptionsJson: Value(jsonEncode(nextCustomOptions)),
               updatedAt: Value(DateTime.now()),
@@ -707,20 +797,20 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
       }
       final row = switch (column.type) {
         CustomColumnType.text => db.ShotCustomValuesCompanion.insert(
-            shotId: shotId,
-            columnId: columnId,
-            textValue: Value(value.toString()),
-          ),
+          shotId: shotId,
+          columnId: columnId,
+          textValue: Value(value.toString()),
+        ),
         CustomColumnType.number => db.ShotCustomValuesCompanion.insert(
-            shotId: shotId,
-            columnId: columnId,
-            numberValue: Value((value as num).toDouble()),
-          ),
+          shotId: shotId,
+          columnId: columnId,
+          numberValue: Value((value as num).toDouble()),
+        ),
         CustomColumnType.singleSelect => db.ShotCustomValuesCompanion.insert(
-            shotId: shotId,
-            columnId: columnId,
-            enumValue: Value(value.toString()),
-          ),
+          shotId: shotId,
+          columnId: columnId,
+          enumValue: Value(value.toString()),
+        ),
       };
       await database.into(database.shotCustomValues).insert(row);
       await _touchProject(database, projectId);
@@ -782,8 +872,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         mode: AssetMode.linked,
         uri: sourcePath,
         fingerprint: fingerprint,
-        missingState:
-            exists ? MissingState.available : MissingState.relinkRequired,
+        missingState: exists
+            ? MissingState.available
+            : MissingState.relinkRequired,
         bytes: exists ? (await file.stat()).size : null,
       );
       await _upsertAsset(
@@ -805,10 +896,10 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     String targetField,
   ) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.delete(database.shotAssets)
-            ..where(
-              (tbl) => tbl.shotId.equals(shotId) & tbl.fieldKey.equals(targetField),
-            ))
+      await (database.delete(database.shotAssets)..where(
+            (tbl) =>
+                tbl.shotId.equals(shotId) & tbl.fieldKey.equals(targetField),
+          ))
           .go();
       await _touchProject(database, projectId);
     });
@@ -830,8 +921,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         mode: current?.mode ?? AssetMode.linked,
         uri: newPath,
         fingerprint: fingerprint,
-        missingState:
-            exists ? MissingState.available : MissingState.relinkRequired,
+        missingState: exists
+            ? MissingState.available
+            : MissingState.relinkRequired,
         width: current?.width,
         height: current?.height,
         bytes: exists ? (await file.stat()).size : null,
@@ -854,9 +946,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     board_domain.BoardPreset preset,
   ) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.update(database.boardPresets)
-            ..where((tbl) => tbl.id.equals(preset.id)))
-          .write(
+      await (database.update(
+        database.boardPresets,
+      )..where((tbl) => tbl.id.equals(preset.id))).write(
         db.BoardPresetsCompanion(
           name: Value(preset.name),
           aspectRatio: Value(preset.aspectRatio),
@@ -878,9 +970,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     column_domain.ColumnPreset preset,
   ) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.update(database.columnPresets)
-            ..where((tbl) => tbl.id.equals(preset.id)))
-          .write(
+      await (database.update(
+        database.columnPresets,
+      )..where((tbl) => tbl.id.equals(preset.id))).write(
         db.ColumnPresetsCompanion(
           name: Value(preset.name),
           kind: Value(preset.kind.name),
@@ -907,23 +999,29 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     return _withDb(projectId, (database, bundle) async {
       final now = updatedAt ?? DateTime.now();
       final created = createdAt ?? now;
+      final normalizedName = name.trim().isEmpty ? '自定义列' : name.trim();
+      final normalizedEnumSource = type == CustomColumnType.singleSelect
+          ? enumSource
+          : null;
       final column = CustomColumnDefinition(
         id: columnId ?? _uuid.v4(),
         projectId: projectId,
-        name: name,
+        name: normalizedName,
         type: type,
-        enumSource: enumSource,
+        enumSource: normalizedEnumSource,
         customOptions: customOptions ?? const [],
         createdAt: created,
         updatedAt: now,
       );
-      await database.into(database.customColumns).insertOnConflictUpdate(
+      await database
+          .into(database.customColumns)
+          .insertOnConflictUpdate(
             db.CustomColumnsCompanion.insert(
               id: column.id,
               projectId: projectId,
-              name: name,
+              name: normalizedName,
               type: type.name,
-              enumSourceId: Value(enumSource?.name),
+              enumSourceId: Value(normalizedEnumSource?.name),
               customOptionsJson: Value(jsonEncode(column.customOptions)),
               createdAt: created,
               updatedAt: now,
@@ -941,9 +1039,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     required String name,
   }) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.update(database.customColumns)
-            ..where((tbl) => tbl.id.equals(columnId)))
-          .write(
+      await (database.update(
+        database.customColumns,
+      )..where((tbl) => tbl.id.equals(columnId))).write(
         db.CustomColumnsCompanion(
           name: Value(name),
           updatedAt: Value(DateTime.now()),
@@ -960,23 +1058,26 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }) async {
     await _withDb(projectId, (database, bundle) async {
       await database.transaction(() async {
-        await (database.delete(database.shotCustomValues)
-              ..where((tbl) => tbl.columnId.equals(columnId)))
-            .go();
-        await (database.delete(database.customColumns)
-              ..where((tbl) => tbl.id.equals(columnId)))
-            .go();
-        final templates = await (database.select(database.columnPresets)
-              ..where((tbl) => tbl.projectId.equals(projectId)))
-            .get();
+        await (database.delete(
+          database.shotCustomValues,
+        )..where((tbl) => tbl.columnId.equals(columnId))).go();
+        await (database.delete(
+          database.customColumns,
+        )..where((tbl) => tbl.id.equals(columnId))).go();
+        final templates = await (database.select(
+          database.columnPresets,
+        )..where((tbl) => tbl.projectId.equals(projectId))).get();
         for (final row in templates) {
-          final visible = (jsonDecode(row.visibleFieldsJson) as List<dynamic>).cast<String>()
-              ..remove('custom:$columnId');
-          final order = (jsonDecode(row.fieldOrderJson) as List<dynamic>).cast<String>()
-              ..remove('custom:$columnId');
-          await (database.update(database.columnPresets)
-                ..where((tbl) => tbl.id.equals(row.id)))
-              .write(
+          final visible =
+              (jsonDecode(row.visibleFieldsJson) as List<dynamic>)
+                  .cast<String>()
+                ..remove('custom:$columnId');
+          final order =
+              (jsonDecode(row.fieldOrderJson) as List<dynamic>).cast<String>()
+                ..remove('custom:$columnId');
+          await (database.update(
+            database.columnPresets,
+          )..where((tbl) => tbl.id.equals(row.id))).write(
             db.ColumnPresetsCompanion(
               visibleFieldsJson: Value(jsonEncode(visible)),
               fieldOrderJson: Value(jsonEncode(order)),
@@ -1007,6 +1108,29 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
+  Future<void> deleteFixedFieldCustomOption({
+    required String projectId,
+    required String fieldKey,
+    required String option,
+  }) async {
+    await _withDb(projectId, (database, bundle) async {
+      final current = await _loadFixedFieldCustomOptionsWithDb(
+        database,
+        projectId,
+      );
+      final next = <String, List<String>>{
+        for (final entry in current.entries)
+          entry.key: [
+            for (final item in entry.value)
+              if (entry.key != fieldKey || item != option) item,
+          ],
+      };
+      await _replaceFixedFieldCustomOptionsWithDb(database, projectId, next);
+      await _touchProject(database, projectId);
+    });
+  }
+
+  @override
   Future<void> replaceFixedFieldCustomOptions({
     required String projectId,
     required Map<String, List<String>> nextOptionsByFieldKey,
@@ -1016,6 +1140,36 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         database,
         projectId,
         nextOptionsByFieldKey,
+      );
+      await _touchProject(database, projectId);
+    });
+  }
+
+  @override
+  Future<void> deleteCustomColumnOption({
+    required String projectId,
+    required String columnId,
+    required String option,
+  }) async {
+    await _withDb(projectId, (database, bundle) async {
+      final row =
+          await (database.select(database.customColumns)
+                ..where((tbl) => tbl.id.equals(columnId))
+                ..limit(1))
+              .getSingle();
+      final current = (jsonDecode(row.customOptionsJson) as List<dynamic>)
+          .cast<String>();
+      final next = [
+        for (final item in current)
+          if (item != option) item,
+      ];
+      await (database.update(
+        database.customColumns,
+      )..where((tbl) => tbl.id.equals(columnId))).write(
+        db.CustomColumnsCompanion(
+          customOptionsJson: Value(jsonEncode(next)),
+          updatedAt: Value(DateTime.now()),
+        ),
       );
       await _touchProject(database, projectId);
     });
@@ -1038,7 +1192,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         fieldOrderKeys: sourcePreset.fieldOrderKeys,
         updatedAt: DateTime.now(),
       );
-      await database.into(database.columnPresets).insertOnConflictUpdate(
+      await database
+          .into(database.columnPresets)
+          .insertOnConflictUpdate(
             db.ColumnPresetsCompanion.insert(
               id: id,
               projectId: projectId,
@@ -1060,8 +1216,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     required String templateId,
   }) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.delete(database.columnPresets)
-            ..where((tbl) => tbl.id.equals(templateId) & tbl.kind.equals('template')))
+      await (database.delete(database.columnPresets)..where(
+            (tbl) => tbl.id.equals(templateId) & tbl.kind.equals('template'),
+          ))
           .go();
       await _touchProject(database, projectId);
     });
@@ -1075,11 +1232,13 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   ) async {
     await _withDb(projectId, (database, bundle) async {
       await database.transaction(() async {
-        await (database.delete(database.planAssignments)
-              ..where((tbl) => tbl.shotId.equals(shotId)))
-            .go();
+        await (database.delete(
+          database.planAssignments,
+        )..where((tbl) => tbl.shotId.equals(shotId))).go();
         final nextOrder = await _nextSectionOrderIndex(database, sectionId);
-        await database.into(database.planAssignments).insert(
+        await database
+            .into(database.planAssignments)
+            .insert(
               db.PlanAssignmentsCompanion.insert(
                 shotId: shotId,
                 sectionId: sectionId,
@@ -1094,9 +1253,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   @override
   Future<void> unassignShot(String projectId, String shotId) async {
     await _withDb(projectId, (database, bundle) async {
-      await (database.delete(database.planAssignments)
-            ..where((tbl) => tbl.shotId.equals(shotId)))
-          .go();
+      await (database.delete(
+        database.planAssignments,
+      )..where((tbl) => tbl.shotId.equals(shotId))).go();
       await _touchProject(database, projectId);
     });
   }
@@ -1107,7 +1266,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     plan_domain.PlanSection section,
   ) async {
     await _withDb(projectId, (database, bundle) async {
-      await database.into(database.planSections).insertOnConflictUpdate(
+      await database
+          .into(database.planSections)
+          .insertOnConflictUpdate(
             db.PlanSectionsCompanion.insert(
               id: section.id,
               projectId: projectId,
@@ -1123,12 +1284,12 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   Future<void> deletePlanSection(String projectId, String sectionId) async {
     await _withDb(projectId, (database, bundle) async {
       await database.transaction(() async {
-        await (database.delete(database.planAssignments)
-              ..where((tbl) => tbl.sectionId.equals(sectionId)))
-            .go();
-        await (database.delete(database.planSections)
-              ..where((tbl) => tbl.id.equals(sectionId)))
-            .go();
+        await (database.delete(
+          database.planAssignments,
+        )..where((tbl) => tbl.sectionId.equals(sectionId))).go();
+        await (database.delete(
+          database.planSections,
+        )..where((tbl) => tbl.id.equals(sectionId))).go();
       });
       await _touchProject(database, projectId);
     });
@@ -1157,15 +1318,12 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     await _withDb(projectId, (database, bundle) async {
       await database.transaction(() async {
         for (var index = 0; index < orderedShotIds.length; index++) {
-          await (database.update(database.planAssignments)
-                ..where(
-                  (tbl) =>
-                      tbl.sectionId.equals(sectionId) &
-                      tbl.shotId.equals(orderedShotIds[index]),
-                ))
-              .write(
-            db.PlanAssignmentsCompanion(orderIndex: Value(index)),
-          );
+          await (database.update(database.planAssignments)..where(
+                (tbl) =>
+                    tbl.sectionId.equals(sectionId) &
+                    tbl.shotId.equals(orderedShotIds[index]),
+              ))
+              .write(db.PlanAssignmentsCompanion(orderIndex: Value(index)));
         }
       });
       await _touchProject(database, projectId);
@@ -1173,7 +1331,10 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
-  Future<void> reorderShots(String projectId, List<String> orderedShotIds) async {
+  Future<void> reorderShots(
+    String projectId,
+    List<String> orderedShotIds,
+  ) async {
     await _withDb(projectId, (database, bundle) async {
       await database.transaction(() async {
         for (var index = 0; index < orderedShotIds.length; index++) {
@@ -1191,8 +1352,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     String shotId,
     db.ShotsCompanion companion,
   ) {
-    return (database.update(database.shots)..where((tbl) => tbl.id.equals(shotId)))
-        .write(companion);
+    return (database.update(
+      database.shots,
+    )..where((tbl) => tbl.id.equals(shotId))).write(companion);
   }
 
   Future<int> _countShots(db.AppDatabase database, String projectId) {
@@ -1222,16 +1384,18 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     required int startIndex,
     required int delta,
   }) async {
-    final affected = await (database.select(database.shots)
-          ..where(
-            (tbl) =>
-                tbl.projectId.equals(projectId) &
-                tbl.orderIndex.isBiggerOrEqualValue(startIndex),
-          )
-          ..orderBy([(tbl) => OrderingTerm.desc(tbl.orderIndex)]))
-        .get();
+    final affected =
+        await (database.select(database.shots)
+              ..where(
+                (tbl) =>
+                    tbl.projectId.equals(projectId) &
+                    tbl.orderIndex.isBiggerOrEqualValue(startIndex),
+              )
+              ..orderBy([(tbl) => OrderingTerm.desc(tbl.orderIndex)]))
+            .get();
     for (final row in affected) {
-      await (database.update(database.shots)..where((tbl) => tbl.id.equals(row.id)))
+      await (database.update(database.shots)
+            ..where((tbl) => tbl.id.equals(row.id)))
           .write(db.ShotsCompanion(orderIndex: Value(row.orderIndex + delta)));
     }
   }
@@ -1240,10 +1404,11 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     db.AppDatabase database,
     String projectId,
   ) async {
-    final rows = await (database.select(database.shots)
-          ..where((tbl) => tbl.projectId.equals(projectId))
-          ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
-        .get();
+    final rows =
+        await (database.select(database.shots)
+              ..where((tbl) => tbl.projectId.equals(projectId))
+              ..orderBy([(tbl) => OrderingTerm.asc(tbl.orderIndex)]))
+            .get();
     for (var index = 0; index < rows.length; index++) {
       if (rows[index].orderIndex == index) {
         continue;
@@ -1276,7 +1441,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     );
 
     if (existing == null) {
-      await database.into(database.shotAssets).insert(
+      await database
+          .into(database.shotAssets)
+          .insert(
             db.ShotAssetsCompanion.insert(
               id: _uuid.v4(),
               shotId: shotId,
@@ -1293,9 +1460,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
       return;
     }
 
-    await (database.update(database.shotAssets)
-          ..where((tbl) => tbl.id.equals(existing.id)))
-        .write(companion);
+    await (database.update(
+      database.shotAssets,
+    )..where((tbl) => tbl.id.equals(existing.id))).write(companion);
   }
 
   Future<db.ShotAsset?> _loadShotAssetRow(
@@ -1336,17 +1503,21 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     ProjectBundle bundle,
     String shotId,
   ) async {
-    final shot = await (database.select(database.shots)
-          ..where((tbl) => tbl.id.equals(shotId))
-          ..limit(1))
-        .getSingle();
-    final assets = await (database.select(database.shotAssets)
-          ..where((tbl) => tbl.shotId.equals(shotId)))
-        .get();
-    final customColumns = await loadCustomColumns(bundle.id);
-    final values = await (database.select(database.shotCustomValues)
-          ..where((tbl) => tbl.shotId.equals(shotId)))
-        .get();
+    final shot =
+        await (database.select(database.shots)
+              ..where((tbl) => tbl.id.equals(shotId))
+              ..limit(1))
+            .getSingle();
+    final assets = await (database.select(
+      database.shotAssets,
+    )..where((tbl) => tbl.shotId.equals(shotId))).get();
+    final customColumns = await _loadSanitizedCustomColumnsWithDb(
+      database,
+      bundle.id,
+    );
+    final values = await (database.select(
+      database.shotCustomValues,
+    )..where((tbl) => tbl.shotId.equals(shotId))).get();
     final valuesByColumn = <String, CustomFieldValue>{};
     for (final value in values) {
       valuesByColumn[value.columnId] = CustomFieldValue(
@@ -1368,8 +1539,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     ProjectBundle bundle,
   ) {
     AssetRef? resolveAsset(String key) {
-      final record =
-          shotAssets.firstWhereOrNull((asset) => asset.fieldKey == key);
+      final record = shotAssets.firstWhereOrNull(
+        (asset) => asset.fieldKey == key,
+      );
       if (record == null) {
         return null;
       }
@@ -1397,21 +1569,31 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
       id: shot.id,
       orderIndex: shot.orderIndex,
       shotNo: shot.shotNo,
-      shotSize: shot.shotSize,
+      shotSize: _normalizeLegacyOption(shot.shotSize),
       durationSec: shot.durationSec,
       content: shot.content,
       dialogue: shot.dialogue,
       notes: shot.notes,
       sceneExpectation: shot.sceneExpectation,
       audio: shot.audio,
-      cameraAngle: shot.cameraAngle,
-      cameraMove: shot.cameraMove,
-      cameraRig: shot.cameraRig,
-      focalLength: shot.focalLength,
+      cameraAngle: _normalizeLegacyOption(shot.cameraAngle),
+      cameraMove: _normalizeLegacyOption(shot.cameraMove),
+      cameraRig: _normalizeLegacyOption(shot.cameraRig),
+      focalLength: _normalizeLegacyOption(shot.focalLength),
       frameImage: resolveAsset(ShotFieldKey.frameImage.storageKey),
       referenceImage: resolveAsset(ShotFieldKey.referenceImage.storageKey),
       customFieldValues: customFieldValues,
     );
+  }
+
+  String _normalizeLegacyOption(String value) {
+    const legacyMap = <String, String>{
+      '涓櫙': '中景',
+      '骞宠': '平视',
+      '鍥哄畾': '固定',
+      '鎵嬫寔': '手持',
+    };
+    return legacyMap[value] ?? value;
   }
 
   String _storedAssetUri(ProjectBundle bundle, AssetRef asset) {
@@ -1442,15 +1624,16 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     db.AppDatabase database,
     String projectId,
   ) async {
-    final rows = await (database.select(database.eventLog)
-          ..where(
-            (tbl) =>
-                tbl.projectId.equals(projectId) &
-                tbl.eventType.equals(_fixedFieldOptionsEventType),
-          )
-          ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
-          ..limit(1))
-        .get();
+    final rows =
+        await (database.select(database.eventLog)
+              ..where(
+                (tbl) =>
+                    tbl.projectId.equals(projectId) &
+                    tbl.eventType.equals(_fixedFieldOptionsEventType),
+              )
+              ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
+              ..limit(1))
+            .get();
     if (rows.isEmpty) {
       return const {};
     }
@@ -1469,7 +1652,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     String projectId,
     Map<String, List<String>> nextOptionsByFieldKey,
   ) {
-    return database.into(database.eventLog).insert(
+    return database
+        .into(database.eventLog)
+        .insert(
           db.EventLogCompanion.insert(
             projectId: projectId,
             eventType: _fixedFieldOptionsEventType,
@@ -1490,12 +1675,16 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
       return;
     }
 
-    final baseOptions = fixedFieldBaseOptionsByKey[fieldKey] ?? const <String>[];
+    final baseOptions =
+        fixedFieldBaseOptionsByKey[fieldKey] ?? const <String>[];
     if (baseOptions.contains(normalizedOption)) {
       return;
     }
 
-    final current = await _loadFixedFieldCustomOptionsWithDb(database, projectId);
+    final current = await _loadFixedFieldCustomOptionsWithDb(
+      database,
+      projectId,
+    );
     final existing = current[fieldKey] ?? const <String>[];
     if (existing.contains(normalizedOption)) {
       return;
@@ -1507,5 +1696,160 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     next[fieldKey] = [...existing, normalizedOption];
     await _replaceFixedFieldCustomOptionsWithDb(database, projectId, next);
   }
-}
 
+  Set<String> _buildValidFieldKeys(List<CustomColumnDefinition> customColumns) {
+    return <String>{
+      for (final field in fixedShotFields) field.storageKey,
+      for (final column in customColumns) column.fieldKey,
+    };
+  }
+
+  List<String> _sanitizeVisibleFieldKeys(
+    List<String> rawKeys,
+    Set<String> validFieldKeys,
+  ) {
+    final sanitized = <String>[];
+    final seen = <String>{};
+    for (final fieldKey in rawKeys) {
+      if (!validFieldKeys.contains(fieldKey)) {
+        continue;
+      }
+      if (seen.add(fieldKey)) {
+        sanitized.add(fieldKey);
+      }
+    }
+    if (!sanitized.contains(ShotFieldKey.shotNo.storageKey)) {
+      sanitized.insert(0, ShotFieldKey.shotNo.storageKey);
+    }
+    return sanitized;
+  }
+
+  List<String> _sanitizeFieldOrderKeys(
+    List<String> rawKeys,
+    Set<String> validFieldKeys,
+  ) {
+    final sanitized = <String>[];
+    final seen = <String>{};
+    for (final fieldKey in rawKeys) {
+      if (!validFieldKeys.contains(fieldKey)) {
+        continue;
+      }
+      if (seen.add(fieldKey)) {
+        sanitized.add(fieldKey);
+      }
+    }
+
+    if (!sanitized.contains(ShotFieldKey.shotNo.storageKey)) {
+      sanitized.insert(0, ShotFieldKey.shotNo.storageKey);
+    }
+
+    for (final field in fixedShotFields) {
+      if (seen.add(field.storageKey)) {
+        sanitized.add(field.storageKey);
+      }
+    }
+
+    for (final fieldKey in validFieldKeys) {
+      if (seen.add(fieldKey)) {
+        sanitized.add(fieldKey);
+      }
+    }
+
+    return sanitized;
+  }
+
+  Future<List<CustomColumnDefinition>> _loadSanitizedCustomColumnsWithDb(
+    db.AppDatabase database,
+    String projectId,
+  ) async {
+    final rows =
+        await (database.select(database.customColumns)
+              ..where((tbl) => tbl.projectId.equals(projectId))
+              ..orderBy([(tbl) => OrderingTerm.asc(tbl.createdAt)]))
+            .get();
+
+    final valueCounts = <String, int>{};
+    final countRows = await database.customSelect('''
+      SELECT column_id, COUNT(*) AS value_count
+      FROM shot_custom_values
+      GROUP BY column_id
+      ''').get();
+    for (final row in countRows) {
+      final columnId = row.read<String>('column_id');
+      final count = row.read<int>('value_count');
+      valueCounts[columnId] = count;
+    }
+
+    final sanitized = <CustomColumnDefinition>[];
+    final removedIds = <String>[];
+
+    for (final row in rows) {
+      final type = CustomColumnType.values.byName(row.type);
+      final normalizedName = row.name.trim();
+      final hasValues = (valueCounts[row.id] ?? 0) > 0;
+      final shouldDropPlaceholder = normalizedName == '1' && !hasValues;
+      if (shouldDropPlaceholder) {
+        removedIds.add(row.id);
+        continue;
+      }
+
+      final enumSource =
+          type == CustomColumnType.singleSelect && row.enumSourceId != null
+          ? BuiltInEnumSource.values.byName(row.enumSourceId!)
+          : null;
+
+      sanitized.add(
+        CustomColumnDefinition(
+          id: row.id,
+          projectId: row.projectId,
+          name: normalizedName.isEmpty ? '自定义列' : normalizedName,
+          type: type,
+          enumSource: enumSource,
+          customOptions: (jsonDecode(row.customOptionsJson) as List<dynamic>)
+              .cast<String>(),
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        ),
+      );
+    }
+
+    if (removedIds.isNotEmpty) {
+      await database.transaction(() async {
+        for (final columnId in removedIds) {
+          await (database.delete(
+            database.customColumns,
+          )..where((tbl) => tbl.id.equals(columnId))).go();
+          await (database.delete(
+            database.shotCustomValues,
+          )..where((tbl) => tbl.columnId.equals(columnId))).go();
+        }
+
+        final validFieldKeys = _buildValidFieldKeys(sanitized);
+        final presetRows = await (database.select(
+          database.columnPresets,
+        )..where((tbl) => tbl.projectId.equals(projectId))).get();
+        for (final row in presetRows) {
+          final visible = _sanitizeVisibleFieldKeys(
+            (jsonDecode(row.visibleFieldsJson) as List<dynamic>).cast<String>(),
+            validFieldKeys,
+          );
+          final order = _sanitizeFieldOrderKeys(
+            (jsonDecode(row.fieldOrderJson) as List<dynamic>).cast<String>(),
+            validFieldKeys,
+          );
+          await (database.update(
+            database.columnPresets,
+          )..where((tbl) => tbl.id.equals(row.id))).write(
+            db.ColumnPresetsCompanion(
+              visibleFieldsJson: Value(jsonEncode(visible)),
+              fieldOrderJson: Value(jsonEncode(order)),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
+        }
+      });
+    }
+
+    return sanitized;
+  }
+}

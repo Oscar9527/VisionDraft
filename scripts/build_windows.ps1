@@ -9,6 +9,8 @@ $flutterRoot = if ($env:FLUTTER_ROOT) {
 $vsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
 $pluginRoot = Join-Path $repoRoot "windows\flutter\ephemeral\.plugin_symlinks"
 $buildDir = Join-Path $repoRoot "tmp_build\cmake_nmake"
+$distDir = Join-Path $repoRoot "dist\windows"
+$stagingDistDir = Join-Path $repoRoot "dist\windows_next"
 $windowsDir = Join-Path $repoRoot "windows"
 $dependenciesFile = Join-Path $repoRoot ".flutter-plugins-dependencies"
 
@@ -26,6 +28,19 @@ if (-not (Test-Path $dependenciesFile)) {
 
 New-Item -ItemType Directory -Force -Path $pluginRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+if (Test-Path $stagingDistDir) {
+  Remove-Item $stagingDistDir -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $stagingDistDir | Out-Null
+
+Get-Process vision_draft -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 800
+
+$cacheFile = Join-Path $buildDir "CMakeCache.txt"
+if (Test-Path $cacheFile) {
+  Remove-Item $cacheFile -Force
+}
 
 $deps = Get-Content $dependenciesFile -Raw | ConvertFrom-Json
 $windowsPlugins = @($deps.plugins.windows)
@@ -59,6 +74,7 @@ $configure = @(
   "-S", "`"$windowsDir`"",
   "-B", "`"$buildDir`"",
   "-G", "`"NMake Makefiles`"",
+  "-DCMAKE_BUILD_TYPE=Release",
   "-DFLUTTER_TARGET_PLATFORM=windows-x64",
   "-DFLUTTER_ROOT=`"$flutterRoot`""
 ) -join " "
@@ -71,15 +87,62 @@ $build = @(
   "&&",
   "cmake",
   "--build", "`"$buildDir`"",
-  "--config", "Debug",
+  "--config", "Release",
   "&&",
   "cmake",
-  "--install", "`"$buildDir`""
+  "--install", "`"$buildDir`"",
+  "--config", "Release"
 ) -join " "
 
 cmd.exe /d /s /c $configure
 cmd.exe /d /s /c $build
 
+$runnerDir = Join-Path $buildDir "runner"
+
+$runtimeEntries = @(
+  "vision_draft.exe",
+  "flutter_windows.dll",
+  "pdfium.dll",
+  "file_selector_windows_plugin.dll",
+  "printing_plugin.dll",
+  "sqlite3_flutter_libs_plugin.dll",
+  "sqlite3.dll",
+  "native_assets.json",
+  "data"
+)
+
+foreach ($entry in $runtimeEntries) {
+  $source = Join-Path $runnerDir $entry
+  if (-not (Test-Path $source)) {
+    throw "Missing runtime artifact: $source"
+  }
+  Copy-Item -Path $source -Destination $stagingDistDir -Recurse -Force
+}
+
+$backupDistDir = Join-Path $repoRoot "dist\windows_prev"
+if (Test-Path $backupDistDir) {
+  Remove-Item $backupDistDir -Recurse -Force
+}
+if (Test-Path $distDir) {
+  Move-Item -Path $distDir -Destination $backupDistDir -Force
+}
+Move-Item -Path $stagingDistDir -Destination $distDir -Force
+if (Test-Path $backupDistDir) {
+  for ($attempt = 0; $attempt -lt 6; $attempt++) {
+    try {
+      Remove-Item $backupDistDir -Recurse -Force
+      break
+    } catch {
+      if ($attempt -eq 5) {
+        Write-Warning "Could not remove previous dist directory: $backupDistDir"
+      } else {
+        Start-Sleep -Milliseconds (500 * ($attempt + 1))
+      }
+    }
+  }
+}
+
 Write-Host ""
 Write-Host "Done."
 Write-Host "EXE: $(Join-Path $buildDir 'runner\vision_draft.exe')"
+Write-Host "DIST: $distDir"

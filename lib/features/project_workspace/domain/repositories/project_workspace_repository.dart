@@ -14,6 +14,8 @@ abstract interface class ProjectWorkspaceRepository {
 
   Future<List<ShotRecord>> loadShots(String projectId);
 
+  Future<ShotRecord> loadShot(String projectId, String shotId);
+
   Future<ColumnPreset> loadColumnPreset(String projectId);
 
   Future<List<ColumnTemplate>> loadColumnTemplates(String projectId);
@@ -31,6 +33,8 @@ abstract interface class ProjectWorkspaceRepository {
   Future<PlanBoard> loadPlanBoard(String projectId);
 
   Future<CallSheet> loadCallSheet(String projectId);
+
+  Future<void> compactProject(String projectId);
 
   Future<ShotRecord> createShot(String projectId, {ShotRecord? seedShot});
 
@@ -113,9 +117,21 @@ abstract interface class ProjectWorkspaceRepository {
     required String option,
   });
 
+  Future<void> deleteFixedFieldCustomOption({
+    required String projectId,
+    required String fieldKey,
+    required String option,
+  });
+
   Future<void> replaceFixedFieldCustomOptions({
     required String projectId,
     required Map<String, List<String>> nextOptionsByFieldKey,
+  });
+
+  Future<void> deleteCustomColumnOption({
+    required String projectId,
+    required String columnId,
+    required String option,
   });
 
   Future<ColumnTemplate> saveColumnTemplate({

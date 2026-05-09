@@ -30,10 +30,11 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
 
   @override
   Future<List<ProjectLibraryEntry>> listProjects() async {
-    final paths = await storageService.resolve();
     final db = await indexDatabaseFactory();
     try {
-      await _syncBundleDirectories(paths.projectsDirectory, db);
+      final paths = await storageService.resolve();
+      await _syncLegacyProjects(paths.supportDirectory, db);
+      await _pruneMissingIndexEntries(db);
       final rows = await (db.select(db.recentProjects)
             ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]))
           .get();
@@ -44,10 +45,12 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
   }
 
   @override
-  Future<ProjectLibraryEntry> createProject(String name) async {
-    final paths = await storageService.resolve();
+  Future<ProjectLibraryEntry> createProject({
+    required String name,
+    required String parentDirectory,
+  }) async {
     final bundle = await bundleService.createBundle(
-      rootDirectory: paths.projectsDirectory,
+      parentDirectory: Directory(parentDirectory),
       name: name,
     );
     await workspaceRepository.initializeProject(bundle);
@@ -58,6 +61,65 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
             ..where((tbl) => tbl.id.equals(bundle.id)))
           .getSingle();
       return _mapRow(row);
+    } finally {
+      await db.close();
+    }
+  }
+
+  @override
+  Future<ProjectLibraryEntry> registerExistingProject(String bundlePath) async {
+    final directory = Directory(bundlePath);
+    if (!await directory.exists()) {
+      throw const FileSystemException('项目目录不存在');
+    }
+    if (p.extension(directory.path).toLowerCase() != '.vdraft') {
+      throw const FileSystemException('请选择 .vdraft 项目目录');
+    }
+
+    final bundle = await bundleService.loadBundle(directory);
+    final db = await indexDatabaseFactory();
+    try {
+      await _upsertBundle(db, bundle);
+      final row = await (db.select(db.recentProjects)
+            ..where((tbl) => tbl.id.equals(bundle.id)))
+          .getSingle();
+      return _mapRow(row);
+    } finally {
+      await db.close();
+    }
+  }
+
+  @override
+  Future<void> deleteProject(String projectId) async {
+    try {
+      await workspaceRepository.compactProject(projectId);
+    } catch (error) {
+      logger.warn('Compact project failed before delete ($projectId): $error');
+    }
+
+    final db = await indexDatabaseFactory();
+    try {
+      final row = await (db.select(db.recentProjects)
+            ..where((tbl) => tbl.id.equals(projectId)))
+          .getSingleOrNull();
+
+      if (row != null) {
+        final bundleDirectory = Directory(row.bundlePath);
+        if (await bundleDirectory.exists()) {
+          await _deleteDirectoryWithRetry(bundleDirectory);
+        }
+      }
+
+      await db.transaction(() async {
+        await (db.delete(db.projectSearchIndex)
+              ..where((tbl) => tbl.projectId.equals(projectId)))
+            .go();
+        await (db.delete(db.trashEntries)..where((tbl) => tbl.id.equals(projectId)))
+            .go();
+        await (db.delete(db.recentProjects)
+              ..where((tbl) => tbl.id.equals(projectId)))
+            .go();
+      });
     } finally {
       await db.close();
     }
@@ -93,10 +155,11 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
     }
   }
 
-  Future<void> _syncBundleDirectories(
-    Directory projectsDirectory,
+  Future<void> _syncLegacyProjects(
+    Directory supportDirectory,
     AppIndexDatabase db,
   ) async {
+    final projectsDirectory = Directory(p.join(supportDirectory.path, 'projects'));
     if (!await projectsDirectory.exists()) {
       return;
     }
@@ -113,6 +176,20 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
       } catch (error) {
         logger.warn('Skipping invalid bundle ${dir.path}: $error');
       }
+    }
+  }
+
+  Future<void> _pruneMissingIndexEntries(AppIndexDatabase db) async {
+    final rows = await db.select(db.recentProjects).get();
+    for (final row in rows) {
+      if (await Directory(row.bundlePath).exists()) {
+        continue;
+      }
+      await (db.delete(db.projectSearchIndex)
+            ..where((tbl) => tbl.projectId.equals(row.id)))
+          .go();
+      await (db.delete(db.recentProjects)..where((tbl) => tbl.id.equals(row.id)))
+          .go();
     }
   }
 
@@ -133,6 +210,22 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
             searchText: '${bundle.name} ${bundle.rootPath}',
           ),
         );
+  }
+
+  Future<void> _deleteDirectoryWithRetry(Directory directory) async {
+    FileSystemException? lastError;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        await directory.delete(recursive: true);
+        return;
+      } on FileSystemException catch (error) {
+        lastError = error;
+        await Future<void>.delayed(Duration(milliseconds: 120 * (attempt + 1)));
+      }
+    }
+    if (lastError != null) {
+      throw lastError;
+    }
   }
 
   ProjectLibraryEntry _mapRow(RecentProject row) {

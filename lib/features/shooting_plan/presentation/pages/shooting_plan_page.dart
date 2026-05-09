@@ -25,7 +25,7 @@ class ShootingPlanPage extends ConsumerWidget {
 
     if (isDesktop) {
       return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
             child: DragTarget<String>(
@@ -49,51 +49,57 @@ class ShootingPlanPage extends ConsumerWidget {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 120),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
+                      Expanded(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 120),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isActive
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Colors.transparent,
+                            ),
                             color: isActive
-                                ? Theme.of(context).colorScheme.primary
+                                ? Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer
+                                    .withValues(alpha: 0.25)
                                 : Colors.transparent,
                           ),
-                          color: isActive
-                              ? Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer
-                                  .withValues(alpha: 0.25)
-                              : Colors.transparent,
-                        ),
-                        child: SizedBox(
-                          height: 520,
-                          child: ListView.separated(
-                            itemBuilder: (context, index) {
-                              final shotId =
-                                  snapshot.planBoard.unassignedShotIds[index];
-                              final shot = shotsById[shotId];
-                              return Draggable<String>(
-                                data: shotId,
-                                feedback: Material(
-                                  color: Colors.transparent,
-                                  child: SizedBox(
-                                    width: 220,
-                                    child: _ShotChip(shot: shot),
+                          child: snapshot.planBoard.unassignedShotIds.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    '所有镜头都已经安排进计划区块',
+                                    style: Theme.of(context).textTheme.bodyMedium,
                                   ),
+                                )
+                              : ListView.separated(
+                                  itemBuilder: (context, index) {
+                                    final shotId = snapshot
+                                        .planBoard.unassignedShotIds[index];
+                                    final shot = shotsById[shotId];
+                                    return Draggable<String>(
+                                      data: shotId,
+                                      feedback: Material(
+                                        color: Colors.transparent,
+                                        child: SizedBox(
+                                          width: 220,
+                                          child: _ShotChip(shot: shot),
+                                        ),
+                                      ),
+                                      childWhenDragging: Opacity(
+                                        opacity: 0.4,
+                                        child: _ShotChip(shot: shot),
+                                      ),
+                                      child: _ShotChip(shot: shot),
+                                    );
+                                  },
+                                  separatorBuilder: (_, _) =>
+                                      const SizedBox(height: 12),
+                                  itemCount:
+                                      snapshot.planBoard.unassignedShotIds.length,
                                 ),
-                                childWhenDragging: Opacity(
-                                  opacity: 0.4,
-                                  child: _ShotChip(shot: shot),
-                                ),
-                                child: _ShotChip(shot: shot),
-                              );
-                            },
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 12),
-                            itemCount:
-                                snapshot.planBoard.unassignedShotIds.length,
-                          ),
                         ),
                       ),
                     ],
@@ -128,40 +134,61 @@ class ShootingPlanPage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   Expanded(
-                    child: ListView.separated(
-                      itemBuilder: (context, index) {
-                        final section = snapshot.planBoard.sections[index];
-                        return PlanSectionCard(
-                          section: section,
-                          shotsById: shotsById,
-                          onAcceptShot: (shotId) => controller.assignShotToPlan(
-                            shotId: shotId,
-                            sectionId: section.id,
-                          ),
-                          onRename: () => _showRenameSectionDialog(
-                            context,
-                            section: section,
-                            onSubmit: (name) => controller.renamePlanSection(
-                              sectionId: section.id,
-                              name: name,
+                    child: snapshot.planBoard.sections.isEmpty
+                        ? Center(
+                            child: Text(
+                              '还没有计划区块，先新建一个区块开始排镜头。',
+                              style: Theme.of(context).textTheme.bodyMedium,
                             ),
+                          )
+                        : ListView.separated(
+                            itemBuilder: (context, index) {
+                              final section = snapshot.planBoard.sections[index];
+                              return PlanSectionCard(
+                                section: section,
+                                shotsById: shotsById,
+                                onAcceptShot: (shotId) =>
+                                    controller.assignShotToPlan(
+                                  shotId: shotId,
+                                  sectionId: section.id,
+                                  ),
+                                onRename: () => _showRenameSectionDialog(
+                                  context,
+                                  section: section,
+                                  onSubmit: (name) =>
+                                      controller.renamePlanSection(
+                                    sectionId: section.id,
+                                    name: name,
+                                  ),
+                                ),
+                                onDelete: () => _showDeleteSectionDialog(
+                                  context,
+                                  section: section,
+                                  onConfirm: () => controller.deletePlanSection(
+                                    sectionId: section.id,
+                                  ),
+                                ),
+                                onUnassignShot: (shotId) =>
+                                    controller.unassignShotFromPlan(
+                                  shotId: shotId,
+                                ),
+                                onReorderShots: (oldIndex, newIndex) async {
+                                  final ordered = [...section.shotIds];
+                                  final moved = ordered.removeAt(oldIndex);
+                                  final target =
+                                      newIndex > oldIndex ? newIndex - 1 : newIndex;
+                                  ordered.insert(target, moved);
+                                  await controller.reorderPlanSectionShots(
+                                    sectionId: section.id,
+                                    orderedShotIds: ordered,
+                                  );
+                                },
+                              );
+                            },
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 16),
+                            itemCount: snapshot.planBoard.sections.length,
                           ),
-                          onReorderShots: (oldIndex, newIndex) async {
-                            final ordered = [...section.shotIds];
-                            final moved = ordered.removeAt(oldIndex);
-                            final target =
-                                newIndex > oldIndex ? newIndex - 1 : newIndex;
-                            ordered.insert(target, moved);
-                            await controller.reorderPlanSectionShots(
-                              sectionId: section.id,
-                              orderedShotIds: ordered,
-                            );
-                          },
-                        );
-                      },
-                      separatorBuilder: (_, _) => const SizedBox(height: 16),
-                      itemCount: snapshot.planBoard.sections.length,
-                    ),
                   ),
                 ],
               ),
@@ -234,6 +261,15 @@ class ShootingPlanPage extends ConsumerWidget {
                           name: name,
                         ),
                       ),
+                      onDelete: () => _showDeleteSectionDialog(
+                        context,
+                        section: section,
+                        onConfirm: () => controller.deletePlanSection(
+                          sectionId: section.id,
+                        ),
+                      ),
+                      onUnassignShot: (shotId) =>
+                          controller.unassignShotFromPlan(shotId: shotId),
                     );
                   },
                   separatorBuilder: (_, _) => const SizedBox(height: 16),
@@ -329,6 +365,41 @@ class ShootingPlanPage extends ConsumerWidget {
         );
       },
     );
+  }
+
+  Future<void> _showDeleteSectionDialog(
+    BuildContext context, {
+    required PlanSection section,
+    required Future<void> Function() onConfirm,
+  }) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('删除计划区块'),
+              content: Text(
+                '将删除“${section.name}”，区块内镜头会回到未规划池。是否继续？',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('删除'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!confirmed) {
+      return;
+    }
+
+    await onConfirm();
   }
 }
 

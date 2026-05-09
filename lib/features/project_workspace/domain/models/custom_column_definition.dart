@@ -55,7 +55,11 @@ class CustomColumnDefinition {
 
   List<String> get options => [
         ...(enumSource?.options ?? const <String>[]),
-        ...customOptions,
+        ...customOptions.where(
+          (item) =>
+              item.trim().isNotEmpty &&
+              !(enumSource?.options ?? const <String>[]).contains(item),
+        ),
       ];
 
   CustomColumnDefinition copyWith({

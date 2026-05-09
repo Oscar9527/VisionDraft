@@ -330,6 +330,19 @@ class RenamePlanSectionCommand extends AppCommand {
   String get label => 'RenamePlanSection';
 }
 
+class DeletePlanSectionCommand extends AppCommand {
+  const DeletePlanSectionCommand({
+    required this.projectId,
+    required this.sectionId,
+  });
+
+  final String projectId;
+  final String sectionId;
+
+  @override
+  String get label => 'DeletePlanSection';
+}
+
 class ReorderPlanSectionShotsCommand extends AppCommand {
   const ReorderPlanSectionShotsCommand({
     required this.projectId,
@@ -343,6 +356,19 @@ class ReorderPlanSectionShotsCommand extends AppCommand {
 
   @override
   String get label => 'ReorderPlanSectionShots';
+}
+
+class UnassignShotFromPlanCommand extends AppCommand {
+  const UnassignShotFromPlanCommand({
+    required this.projectId,
+    required this.shotId,
+  });
+
+  final String projectId;
+  final String shotId;
+
+  @override
+  String get label => 'UnassignShotFromPlan';
 }
 
 class GenerateCallSheetCommand extends AppCommand {

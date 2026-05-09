@@ -32,8 +32,10 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/dist/
 /tmp_build/
 /tmp_run_logs/
+/tmp_*
 /tmp_*/
 /windows/flutter/ephemeral/
 *.obj

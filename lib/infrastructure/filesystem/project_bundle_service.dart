@@ -18,12 +18,17 @@ class ProjectBundleService {
   final Uuid _uuid;
 
   Future<ProjectBundle> createBundle({
-    required Directory rootDirectory,
+    required Directory parentDirectory,
     required String name,
   }) async {
     final projectId = _uuid.v4();
-    final bundleRoot = Directory(p.join(rootDirectory.path, '$projectId.vdraft'));
+    final safeName = _sanitizeBundleName(name);
+    final bundleRoot = Directory(p.join(parentDirectory.path, '$safeName.vdraft'));
     final now = DateTime.now();
+
+    if (await bundleRoot.exists()) {
+      throw AppException('项目目录已存在：${bundleRoot.path}');
+    }
 
     await Directory(p.join(bundleRoot.path, 'assets', 'originals'))
         .create(recursive: true);
@@ -50,6 +55,14 @@ class ProjectBundleService {
       createdAt: now,
       updatedAt: now,
     );
+  }
+
+  String _sanitizeBundleName(String name) {
+    final normalized = name.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    if (normalized.isEmpty) {
+      return '未命名项目';
+    }
+    return normalized;
   }
 
   Future<ProjectBundle> loadBundle(Directory bundleRoot) async {

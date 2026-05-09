@@ -3,7 +3,14 @@ import 'project_library_models.dart';
 abstract interface class ProjectLibraryRepository {
   Future<List<ProjectLibraryEntry>> listProjects();
 
-  Future<ProjectLibraryEntry> createProject(String name);
+  Future<ProjectLibraryEntry> createProject({
+    required String name,
+    required String parentDirectory,
+  });
+
+  Future<ProjectLibraryEntry> registerExistingProject(String bundlePath);
+
+  Future<void> deleteProject(String projectId);
 
   Future<String?> findBundlePath(String projectId);
 

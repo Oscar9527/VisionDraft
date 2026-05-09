@@ -9,15 +9,19 @@ class PlanSectionCard extends StatelessWidget {
     required this.section,
     required this.shotsById,
     this.onRename,
+    this.onDelete,
     this.onAcceptShot,
     this.onReorderShots,
+    this.onUnassignShot,
   });
 
   final PlanSection section;
   final Map<String, ShotRecord> shotsById;
   final Future<void> Function()? onRename;
+  final Future<void> Function()? onDelete;
   final Future<void> Function(String shotId)? onAcceptShot;
   final Future<void> Function(int oldIndex, int newIndex)? onReorderShots;
+  final Future<void> Function(String shotId)? onUnassignShot;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +51,11 @@ class PlanSectionCard extends StatelessWidget {
                       tooltip: '重命名区块',
                       onPressed: onRename == null ? null : () => onRename!(),
                       icon: const Icon(Icons.edit_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '删除区块',
+                      onPressed: onDelete == null ? null : () => onDelete!(),
+                      icon: const Icon(Icons.delete_outline_rounded),
                     ),
                   ],
                 ),
@@ -100,9 +109,19 @@ class PlanSectionCard extends StatelessWidget {
                                 ),
                                 childWhenDragging: Opacity(
                                   opacity: 0.4,
-                                  child: _PlanShotTile(shot: shot),
+                                  child: _PlanShotTile(
+                                    shot: shot,
+                                    onUnassign: onUnassignShot == null
+                                        ? null
+                                        : () => onUnassignShot!(shotId),
+                                  ),
                                 ),
-                                child: _PlanShotTile(shot: shot),
+                                child: _PlanShotTile(
+                                  shot: shot,
+                                  onUnassign: onUnassignShot == null
+                                      ? null
+                                      : () => onUnassignShot!(shotId),
+                                ),
                               ),
                             );
                           },
@@ -118,9 +137,13 @@ class PlanSectionCard extends StatelessWidget {
 }
 
 class _PlanShotTile extends StatelessWidget {
-  const _PlanShotTile({required this.shot});
+  const _PlanShotTile({
+    required this.shot,
+    this.onUnassign,
+  });
 
   final ShotRecord? shot;
+  final Future<void> Function()? onUnassign;
 
   @override
   Widget build(BuildContext context) {
@@ -156,6 +179,12 @@ class _PlanShotTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          if (onUnassign != null)
+            IconButton(
+              tooltip: '移回未规划',
+              onPressed: () => onUnassign!(),
+              icon: const Icon(Icons.undo_rounded, size: 18),
+            ),
           const Icon(Icons.drag_indicator_rounded),
         ],
       ),

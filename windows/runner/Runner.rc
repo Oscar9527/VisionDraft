@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.visiondraft" "\0"
-            VALUE "FileDescription", "vision_draft" "\0"
+            VALUE "FileDescription", "VisionDraft" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "vision_draft" "\0"
+            VALUE "InternalName", "VisionDraft" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.visiondraft. All rights reserved." "\0"
-            VALUE "OriginalFilename", "vision_draft.exe" "\0"
-            VALUE "ProductName", "vision_draft" "\0"
+            VALUE "OriginalFilename", "VisionDraft.exe" "\0"
+            VALUE "ProductName", "VisionDraft" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

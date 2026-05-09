@@ -5,6 +5,8 @@ import '../domain/models/asset_ref.dart';
 import '../domain/models/board_preset.dart';
 import '../domain/models/column_preset.dart';
 import '../domain/models/custom_column_definition.dart';
+import '../domain/models/shot_record.dart';
+import '../domain/models/shot_fields.dart';
 import '../domain/queries/project_workspace_snapshot.dart';
 
 class ProjectWorkspaceController
@@ -16,34 +18,44 @@ class ProjectWorkspaceController
   }
 
   Future<void> load(String projectId) async {
+    state = state.copyWith(isLoading: true, clearError: true);
     final repo = ref.read(projectWorkspaceRepositoryProvider);
-    final bundle = await repo.loadBundle(projectId);
-    final shots = await repo.loadShots(projectId);
-    final columnPreset = await repo.loadColumnPreset(projectId);
-    final columnTemplates = await repo.loadColumnTemplates(projectId);
-    final customColumns = await repo.loadCustomColumns(projectId);
-    final fixedFieldCustomOptions =
-        await repo.loadFixedFieldCustomOptions(projectId);
-    final boardPreset = await repo.loadBoardPreset(projectId);
-    final planBoard = await repo.loadPlanBoard(projectId);
-    final callSheet = await repo.loadCallSheet(projectId);
-    state = ProjectWorkspaceSnapshot(
-      bundle: bundle,
-      shots: shots,
-      columnPreset: columnPreset,
-      columnTemplates: columnTemplates,
-      customColumns: customColumns,
-      fixedFieldCustomOptions: fixedFieldCustomOptions,
-      boardPreset: boardPreset,
-      planBoard: planBoard,
-      callSheet: callSheet,
-      isLoading: false,
-    );
+    try {
+      final bundle = await repo.loadBundle(projectId);
+      final shots = await repo.loadShots(projectId);
+      final columnPreset = await repo.loadColumnPreset(projectId);
+      final columnTemplates = await repo.loadColumnTemplates(projectId);
+      final customColumns = await repo.loadCustomColumns(projectId);
+      final fixedFieldCustomOptions =
+          await repo.loadFixedFieldCustomOptions(projectId);
+      final boardPreset = await repo.loadBoardPreset(projectId);
+      final planBoard = await repo.loadPlanBoard(projectId);
+      final callSheet = await repo.loadCallSheet(projectId);
+      state = ProjectWorkspaceSnapshot(
+        bundle: bundle,
+        shots: shots,
+        columnPreset: columnPreset,
+        columnTemplates: columnTemplates,
+        customColumns: customColumns,
+        fixedFieldCustomOptions: fixedFieldCustomOptions,
+        boardPreset: boardPreset,
+        planBoard: planBoard,
+        callSheet: callSheet,
+        isLoading: false,
+      );
+    } catch (error) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: error.toString(),
+      );
+    }
   }
 
   Future<void> createShot() async {
     await ref.read(workspaceCommandServiceProvider).createShot(arg);
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final shots = await repo.loadShots(arg);
+    state = state.copyWith(shots: shots, isLoading: false, clearError: true);
   }
 
   Future<void> reorderShots(int oldIndex, int newIndex) async {
@@ -57,7 +69,9 @@ class ProjectWorkspaceController
           shotId: shots[oldIndex].id,
           toIndex: safeTarget,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final nextShots = await repo.loadShots(arg);
+    state = state.copyWith(shots: nextShots, isLoading: false, clearError: true);
   }
 
   Future<void> updateShotField({
@@ -65,13 +79,28 @@ class ProjectWorkspaceController
     required String fieldKey,
     required Object? value,
   }) async {
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
     await ref.read(workspaceCommandServiceProvider).updateField(
           projectId: arg,
           shotId: shotId,
           fieldKey: fieldKey,
           value: value,
         );
-    await load(arg);
+    final updatedShot = await repo.loadShot(arg, shotId);
+    final fixedFieldCustomOptions =
+        fixedFieldSupportsCustomValue(fieldKey) && value is String
+            ? await repo.loadFixedFieldCustomOptions(arg)
+            : state.fixedFieldCustomOptions;
+    final customColumns = fieldKey.startsWith('custom:')
+        ? await repo.loadCustomColumns(arg)
+        : state.customColumns;
+    state = state.copyWith(
+      shots: _replaceShot(updatedShot),
+      fixedFieldCustomOptions: fixedFieldCustomOptions,
+      customColumns: customColumns,
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> importAsset({
@@ -87,7 +116,13 @@ class ProjectWorkspaceController
           sourcePath: sourcePath,
           assetMode: assetMode,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final updatedShot = await repo.loadShot(arg, shotId);
+    state = state.copyWith(
+      shots: _replaceShot(updatedShot),
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> relinkAsset({
@@ -101,7 +136,13 @@ class ProjectWorkspaceController
           targetField: targetField,
           newPath: newPath,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final updatedShot = await repo.loadShot(arg, shotId);
+    state = state.copyWith(
+      shots: _replaceShot(updatedShot),
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> assignShotToPlan({
@@ -113,32 +154,34 @@ class ProjectWorkspaceController
           shotId: shotId,
           sectionId: sectionId,
         );
-    await load(arg);
+    await _refreshPlanBoard();
   }
 
   Future<void> unassignShotFromPlan({
     required String shotId,
   }) async {
-    final repo = ref.read(projectWorkspaceRepositoryProvider);
-    await repo.unassignShot(arg, shotId);
-    await load(arg);
+    await ref.read(workspaceCommandServiceProvider).unassignShotFromPlan(
+          projectId: arg,
+          shotId: shotId,
+        );
+    await _refreshPlanBoard();
   }
 
   Future<void> updateBoardPreset(BoardPreset preset) async {
     await ref.read(workspaceCommandServiceProvider).updateBoardPreset(arg, preset);
-    await load(arg);
+    state = state.copyWith(boardPreset: preset, isLoading: false, clearError: true);
   }
 
   Future<void> updateColumnPreset(ColumnPreset preset) async {
     await ref
         .read(workspaceCommandServiceProvider)
         .updateColumnPreset(arg, preset);
-    await load(arg);
+    state = state.copyWith(columnPreset: preset, isLoading: false, clearError: true);
   }
 
   Future<void> createPlanSection(String name) async {
     await ref.read(workspaceCommandServiceProvider).createPlanSection(arg, name);
-    await load(arg);
+    await _refreshPlanBoard();
   }
 
   Future<void> renamePlanSection({
@@ -150,7 +193,17 @@ class ProjectWorkspaceController
           sectionId: sectionId,
           name: name,
         );
-    await load(arg);
+    await _refreshPlanBoard();
+  }
+
+  Future<void> deletePlanSection({
+    required String sectionId,
+  }) async {
+    await ref.read(workspaceCommandServiceProvider).deletePlanSection(
+          projectId: arg,
+          sectionId: sectionId,
+        );
+    await _refreshPlanBoard();
   }
 
   Future<void> reorderPlanSectionShots({
@@ -162,7 +215,7 @@ class ProjectWorkspaceController
           sectionId: sectionId,
           orderedShotIds: orderedShotIds,
         );
-    await load(arg);
+    await _refreshPlanBoard();
   }
 
   Future<void> batchUpdateShotField({
@@ -176,7 +229,24 @@ class ProjectWorkspaceController
           fieldKey: fieldKey,
           value: value,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final updatedShots = await Future.wait(
+      shotIds.map((shotId) => repo.loadShot(arg, shotId)),
+    );
+    final fixedFieldCustomOptions =
+        fixedFieldSupportsCustomValue(fieldKey) && value is String
+            ? await repo.loadFixedFieldCustomOptions(arg)
+            : state.fixedFieldCustomOptions;
+    final customColumns = fieldKey.startsWith('custom:')
+        ? await repo.loadCustomColumns(arg)
+        : state.customColumns;
+    state = state.copyWith(
+      shots: _replaceShots(updatedShots),
+      fixedFieldCustomOptions: fixedFieldCustomOptions,
+      customColumns: customColumns,
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> createCustomColumn({
@@ -190,7 +260,7 @@ class ProjectWorkspaceController
           type: type,
           enumSource: enumSource,
         );
-    await load(arg);
+    await _refreshColumnArtifacts();
   }
 
   Future<void> renameCustomColumn({
@@ -202,7 +272,9 @@ class ProjectWorkspaceController
           columnId: columnId,
           name: name,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final customColumns = await repo.loadCustomColumns(arg);
+    state = state.copyWith(customColumns: customColumns, isLoading: false, clearError: true);
   }
 
   Future<void> deleteCustomColumn(String columnId) async {
@@ -210,7 +282,43 @@ class ProjectWorkspaceController
           projectId: arg,
           columnId: columnId,
         );
-    await load(arg);
+    await _refreshColumnArtifacts(refreshShots: true);
+  }
+
+  Future<void> deleteFixedFieldCustomOption({
+    required String fieldKey,
+    required String option,
+  }) async {
+    await ref.read(workspaceCommandServiceProvider).deleteFixedFieldOption(
+          projectId: arg,
+          fieldKey: fieldKey,
+          option: option,
+        );
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final fixedFieldCustomOptions = await repo.loadFixedFieldCustomOptions(arg);
+    state = state.copyWith(
+      fixedFieldCustomOptions: fixedFieldCustomOptions,
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> deleteCustomColumnOption({
+    required String columnId,
+    required String option,
+  }) async {
+    await ref.read(workspaceCommandServiceProvider).deleteCustomColumnOption(
+          projectId: arg,
+          columnId: columnId,
+          option: option,
+        );
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final customColumns = await repo.loadCustomColumns(arg);
+    state = state.copyWith(
+      customColumns: customColumns,
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> saveColumnTemplate(String name) async {
@@ -218,7 +326,13 @@ class ProjectWorkspaceController
           projectId: arg,
           name: name,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final templates = await repo.loadColumnTemplates(arg);
+    state = state.copyWith(
+      columnTemplates: templates,
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> applyColumnTemplate(String templateId) async {
@@ -226,7 +340,9 @@ class ProjectWorkspaceController
           projectId: arg,
           templateId: templateId,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final preset = await repo.loadColumnPreset(arg);
+    state = state.copyWith(columnPreset: preset, isLoading: false, clearError: true);
   }
 
   Future<void> deleteColumnTemplate(String templateId) async {
@@ -234,7 +350,13 @@ class ProjectWorkspaceController
           projectId: arg,
           templateId: templateId,
         );
-    await load(arg);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final templates = await repo.loadColumnTemplates(arg);
+    state = state.copyWith(
+      columnTemplates: templates,
+      isLoading: false,
+      clearError: true,
+    );
   }
 
   Future<void> undo() async {
@@ -245,5 +367,46 @@ class ProjectWorkspaceController
   Future<void> redo() async {
     await ref.read(workspaceCommandServiceProvider).redo(arg);
     await load(arg);
+  }
+
+  Future<void> _refreshPlanBoard() async {
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final planBoard = await repo.loadPlanBoard(arg);
+    state = state.copyWith(planBoard: planBoard, isLoading: false, clearError: true);
+  }
+
+  Future<void> _refreshColumnArtifacts({bool refreshShots = false}) async {
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final columnPreset = await repo.loadColumnPreset(arg);
+    final columnTemplates = await repo.loadColumnTemplates(arg);
+    final customColumns = await repo.loadCustomColumns(arg);
+    final shots = refreshShots ? await repo.loadShots(arg) : state.shots;
+    state = state.copyWith(
+      shots: shots,
+      columnPreset: columnPreset,
+      columnTemplates: columnTemplates,
+      customColumns: customColumns,
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  List<ShotRecord> _replaceShot(ShotRecord shot) {
+    return [
+      for (final current in state.shots)
+        if (current.id == shot.id) shot else current,
+    ];
+  }
+
+  List<ShotRecord> _replaceShots(List<ShotRecord> nextShots) {
+    if (nextShots.isEmpty) {
+      return state.shots;
+    }
+    final byId = {
+      for (final shot in nextShots) shot.id: shot,
+    };
+    return [
+      for (final current in state.shots) byId[current.id] ?? current,
+    ];
   }
 }

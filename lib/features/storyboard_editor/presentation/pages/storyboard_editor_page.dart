@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/bootstrap/providers.dart';
 import '../../../../core/widgets/surface_card.dart';
+import '../../../project_workspace/application/project_workspace_controller.dart';
 import '../../../project_workspace/domain/models/board_preset.dart';
 import '../../../project_workspace/domain/models/column_preset.dart';
 import '../../../project_workspace/domain/models/column_template.dart';
@@ -29,11 +30,55 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
   bool _isBatchMode = false;
   final Set<String> _selectedShotIds = <String>{};
 
+  static const List<({double value, String label})> _aspectRatioOptions = [
+    (value: 1 / 1, label: '1:1'),
+    (value: 16 / 9, label: '16:9'),
+    (value: 2 / 1, label: '2:1'),
+    (value: 1.85 / 1, label: '1.85:1'),
+    (value: 2.35 / 1, label: '2.35:1'),
+    (value: 2.39 / 1, label: '2.39:1'),
+    (value: 1.66 / 1, label: '1.66:1'),
+    (value: 4 / 3, label: '4:3'),
+    (value: 9 / 16, label: '9:16'),
+    (value: 1 / 2, label: '1:2'),
+    (value: 3 / 4, label: '3:4'),
+  ];
+
+  void _openColumnSettings(
+    BuildContext context,
+    ProjectWorkspaceController controller,
+    snapshot,
+  ) {
+    _showColumnSettingsSheet(
+      context,
+      activePreset: snapshot.columnPreset,
+      templates: snapshot.columnTemplates,
+      customColumns: snapshot.customColumns,
+      onSubmitPreset: controller.updateColumnPreset,
+      onSaveTemplate: controller.saveColumnTemplate,
+      onApplyTemplate: controller.applyColumnTemplate,
+      onDeleteTemplate: controller.deleteColumnTemplate,
+      onRenameColumn: controller.renameCustomColumn,
+      onDeleteColumn: controller.deleteCustomColumn,
+      onCreateCustomColumn: ({required name, required type, enumSource}) =>
+          controller.createCustomColumn(
+            name: name,
+            type: type,
+            enumSource: enumSource,
+          ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final snapshot = ref.watch(workspaceControllerProvider(widget.projectId));
-    final controller =
-        ref.read(workspaceControllerProvider(widget.projectId).notifier);
+    final controller = ref.read(
+      workspaceControllerProvider(widget.projectId).notifier,
+    );
+    final gridSession = ref.watch(editorGridSessionProvider(widget.projectId));
+    final gridSessionController = ref.read(
+      editorGridSessionProvider(widget.projectId).notifier,
+    );
     final history = ref.watch(historyManagerProvider);
     final totalDuration = snapshot.shots.fold<int>(
       0,
@@ -131,14 +176,16 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           onChooseSelection: (action) {
             final shotIds = snapshot.shots.map((shot) => shot.id).toList();
             setState(() {
+              _isBatchMode = true;
               switch (action) {
                 case _SelectionAction.selectAll:
                   _selectedShotIds
                     ..clear()
                     ..addAll(shotIds);
                 case _SelectionAction.invert:
-                  final next =
-                      shotIds.where((id) => !_selectedShotIds.contains(id));
+                  final next = shotIds.where(
+                    (id) => !_selectedShotIds.contains(id),
+                  );
                   _selectedShotIds
                     ..clear()
                     ..addAll(next);
@@ -150,49 +197,43 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           onOpenBatchEdit: _selectedShotIds.isEmpty
               ? null
               : () => _showBatchEditSheet(
-                    context,
-                    customColumns: snapshot.customColumns,
-                    fixedFieldCustomOptions: snapshot.fixedFieldCustomOptions,
-                    onApply: (fieldKey, value) async {
-                      await controller.batchUpdateShotField(
-                        shotIds: _selectedShotIds.toList(),
-                        fieldKey: fieldKey,
-                        value: value,
-                      );
-                    },
-                  ),
+                  context,
+                  customColumns: snapshot.customColumns,
+                  fixedFieldCustomOptions: snapshot.fixedFieldCustomOptions,
+                  onApply: (fieldKey, value) async {
+                    await controller.batchUpdateShotField(
+                      shotIds: _selectedShotIds.toList(),
+                      fieldKey: fieldKey,
+                      value: value,
+                    );
+                  },
+                ),
           onOpenBoardSettings: () => _showBoardSettingsSheet(
             context,
             preset: snapshot.boardPreset,
             onSubmit: controller.updateBoardPreset,
           ),
-          onOpenColumnSettings: () => _showColumnSettingsSheet(
-            context,
-            activePreset: snapshot.columnPreset,
-            templates: snapshot.columnTemplates,
-            customColumns: snapshot.customColumns,
-            onSubmitPreset: controller.updateColumnPreset,
-            onSaveTemplate: controller.saveColumnTemplate,
-            onApplyTemplate: controller.applyColumnTemplate,
-            onDeleteTemplate: controller.deleteColumnTemplate,
-            onRenameColumn: controller.renameCustomColumn,
-            onDeleteColumn: controller.deleteCustomColumn,
-          ),
-          onCreateCustomColumn: () => _showCreateCustomColumnSheet(
-            context,
-            onSubmit: controller.createCustomColumn,
-          ),
+          onOpenColumnSettings: () =>
+              _openColumnSettings(context, controller, snapshot),
         ),
-        const SizedBox(height: 16),
         Expanded(
           child: StoryboardTable(
             shots: snapshot.shots,
             columnPreset: snapshot.columnPreset,
+            effectiveFieldOrderKeys: gridSession.effectiveFieldOrderKeys,
             customColumns: snapshot.customColumns,
             fixedFieldCustomOptions: snapshot.fixedFieldCustomOptions,
             boardPreset: snapshot.boardPreset,
             isBatchMode: _isBatchMode,
             selectedShotIds: _selectedShotIds,
+            zoomPercent: gridSession.zoomPercent,
+            columnWidths: gridSession.columnWidthsByFieldKey,
+            rowHeights: gridSession.rowHeightsByShotId,
+            focusedCell: gridSession.focusedCell,
+            onZoomChanged: gridSessionController.setZoomPercent,
+            onColumnWidthChanged: gridSessionController.setColumnWidth,
+            onRowHeightChanged: gridSessionController.setRowHeight,
+            onFocusedCellChanged: gridSessionController.setFocusedCell,
             onSelectShot: (shotId, selected) {
               setState(() {
                 if (selected) {
@@ -206,19 +247,79 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             onUpdateField: controller.updateShotField,
             onImportAsset: controller.importAsset,
             onRelinkAsset: controller.relinkAsset,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Wrap(
-            spacing: 8,
-            children: [
-              _FooterChip(label: '镜头总数', value: '${snapshot.shots.length}'),
-              _FooterChip(label: '总时长', value: '${totalDuration}s'),
-              if (_isBatchMode)
-                _FooterChip(label: '已选', value: '${_selectedShotIds.length}'),
-            ],
+            onAddColumn: () async =>
+                _openColumnSettings(context, controller, snapshot),
+            onHideColumn: (fieldKey) async {
+              final nextVisible = snapshot.columnPreset.visibleFieldKeys
+                  .where((key) => key != fieldKey)
+                  .toList();
+              await controller.updateColumnPreset(
+                snapshot.columnPreset.copyWith(
+                  visibleFieldKeys: nextVisible,
+                  updatedAt: DateTime.now(),
+                ),
+              );
+            },
+            onMoveColumnLeft: (fieldKey) async {
+              gridSessionController.moveFieldByOffset(
+                fieldKey: fieldKey,
+                offset: -1,
+                fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
+              );
+            },
+            onMoveColumnRight: (fieldKey) async {
+              gridSessionController.moveFieldByOffset(
+                fieldKey: fieldKey,
+                offset: 1,
+                fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
+              );
+            },
+            onReorderField:
+                ({
+                  required draggedFieldKey,
+                  required targetFieldKey,
+                  required placeAfter,
+                }) {
+                  gridSessionController.reorderField(
+                    draggedFieldKey: draggedFieldKey,
+                    targetFieldKey: targetFieldKey,
+                    placeAfter: placeAfter,
+                    fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
+                  );
+                },
+            onRenameColumn: (columnId) async {
+              final column = snapshot.customColumns
+                  .where((item) => item.id == columnId)
+                  .firstOrNull;
+              if (column == null) {
+                return;
+              }
+              final next = await _showNamePrompt(
+                context,
+                title: '重命名列',
+                label: '列名',
+                initialValue: column.name,
+              );
+              if (next == null || next.trim().isEmpty) {
+                return;
+              }
+              await controller.renameCustomColumn(
+                columnId: columnId,
+                name: next.trim(),
+              );
+            },
+            onDeleteColumn: controller.deleteCustomColumn,
+            onDeleteFixedFieldOption: ({required fieldKey, required option}) =>
+                controller.deleteFixedFieldCustomOption(
+                  fieldKey: fieldKey,
+                  option: option,
+                ),
+            onDeleteCustomColumnOption:
+                ({required columnId, required option}) =>
+                    controller.deleteCustomColumnOption(
+                      columnId: columnId,
+                      option: option,
+                    ),
           ),
         ),
       ],
@@ -231,11 +332,12 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
       required String name,
       required CustomColumnType type,
       BuiltInEnumSource? enumSource,
-    }) onSubmit,
+    })
+    onSubmit,
   }) async {
     final nameController = TextEditingController();
     CustomColumnType type = CustomColumnType.text;
-    BuiltInEnumSource? enumSource = BuiltInEnumSource.priority;
+    BuiltInEnumSource? enumSource;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -262,13 +364,11 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                         .map(
                           (item) => DropdownMenuItem(
                             value: item,
-                            child: Text(
-                              switch (item) {
-                                CustomColumnType.text => '文本',
-                                CustomColumnType.number => '数字',
-                                CustomColumnType.singleSelect => '单选',
-                              },
-                            ),
+                            child: Text(switch (item) {
+                              CustomColumnType.text => '文本',
+                              CustomColumnType.number => '数字',
+                              CustomColumnType.singleSelect => '单选',
+                            }),
                           ),
                         )
                         .toList(),
@@ -356,8 +456,15 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     required Future<void> Function({
       required String columnId,
       required String name,
-    }) onRenameColumn,
+    })
+    onRenameColumn,
     required Future<void> Function(String columnId) onDeleteColumn,
+    required Future<void> Function({
+      required String name,
+      required CustomColumnType type,
+      BuiltInEnumSource? enumSource,
+    })
+    onCreateCustomColumn,
   }) async {
     final visibleKeys = [...activePreset.visibleFieldKeys];
     final orderedKeys = [...activePreset.fieldOrderKeys];
@@ -429,6 +536,21 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                         ),
                       ),
                       const SizedBox(width: 12),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          await _showCreateCustomColumnSheet(
+                            context,
+                            onSubmit: onCreateCustomColumn,
+                          );
+                          if (!sheetContext.mounted) {
+                            return;
+                          }
+                          Navigator.of(sheetContext).pop();
+                        },
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('新增列'),
+                      ),
+                      const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: () async {
                           final name = await _showNamePrompt(
@@ -495,8 +617,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                       onReorder: (oldIndex, newIndex) {
                         setSheetState(() {
                           final item = orderedKeys.removeAt(oldIndex);
-                          final target =
-                              newIndex > oldIndex ? newIndex - 1 : newIndex;
+                          final target = newIndex > oldIndex
+                              ? newIndex - 1
+                              : newIndex;
                           orderedKeys.insert(target, item);
                         });
                       },
@@ -528,14 +651,12 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                           title: Text(labelFor(fieldKey)),
                           subtitle: custom == null
                               ? null
-                              : Text(
-                                  switch (custom.type) {
-                                    CustomColumnType.text => '文本',
-                                    CustomColumnType.number => '数字',
-                                    CustomColumnType.singleSelect =>
-                                      '单选 · ${custom.enumSource?.label ?? ''}',
-                                  },
-                                ),
+                              : Text(switch (custom.type) {
+                                  CustomColumnType.text => '文本',
+                                  CustomColumnType.number => '数字',
+                                  CustomColumnType.singleSelect =>
+                                    '单选 · ${custom.enumSource?.label ?? ''}',
+                                }),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -572,7 +693,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                                     }
                                     Navigator.of(sheetContext).pop();
                                   },
-                                  icon: const Icon(Icons.delete_outline_rounded),
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                  ),
                                 ),
                               ],
                               const Icon(Icons.drag_indicator_rounded),
@@ -617,21 +740,10 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     required BoardPreset preset,
     required Future<void> Function(BoardPreset preset) onSubmit,
   }) async {
-    final aspectRatioOptions = <double, String>{
-      1 / 1: '1:1',
-      16 / 9: '16:9',
-      2 / 1: '2:1',
-      1.85 / 1: '1.85:1',
-      2.35 / 1: '2.35:1',
-      2.39 / 1: '2.39:1',
-      1.66 / 1: '1.66:1',
-      4 / 3: '4:3',
-      9 / 16: '9:16',
-      1 / 2: '1:2',
-      3 / 4: '3:4',
-    };
-
     var draft = preset;
+    final customRatioController = TextEditingController(
+      text: _formatAspectRatioValue(preset.aspectRatio),
+    );
 
     await showModalBottomSheet<void>(
       context: context,
@@ -669,13 +781,13 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<double>(
-                    initialValue: draft.aspectRatio,
+                    initialValue: _matchingAspectRatio(draft.aspectRatio),
                     decoration: const InputDecoration(labelText: '图片比例'),
-                    items: aspectRatioOptions.entries
+                    items: _aspectRatioOptions
                         .map(
                           (entry) => DropdownMenuItem(
-                            value: entry.key,
-                            child: Text(entry.value),
+                            value: entry.value,
+                            child: Text(entry.label),
                           ),
                         )
                         .toList(),
@@ -685,8 +797,33 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                       }
                       setSheetState(() {
                         draft = draft.copyWith(aspectRatio: value);
+                        customRatioController.text = _formatAspectRatioValue(
+                          value,
+                        );
                       });
                     },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: customRatioController,
+                    decoration: const InputDecoration(
+                      labelText: '自定义比例',
+                      hintText: '支持 2.35 或 21:9',
+                    ),
+                    onChanged: (value) {
+                      final parsed = _parseAspectRatioInput(value);
+                      if (parsed == null) {
+                        return;
+                      }
+                      setSheetState(() {
+                        draft = draft.copyWith(aspectRatio: parsed);
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '当前比例：${_formatAspectRatioLabel(draft.aspectRatio)}',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<ImageFitMode>(
@@ -746,8 +883,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                     onChanged: (value) {
                       setSheetState(() {
                         draft = draft.copyWith(
-                          shotNumberMode:
-                              value ? ShotNumberMode.custom : ShotNumberMode.order,
+                          shotNumberMode: value
+                              ? ShotNumberMode.custom
+                              : ShotNumberMode.order,
                         );
                       });
                     },
@@ -780,6 +918,54 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
         );
       },
     );
+
+    customRatioController.dispose();
+  }
+
+  double? _matchingAspectRatio(double value) {
+    for (final option in _aspectRatioOptions) {
+      if ((option.value - value).abs() < 0.001) {
+        return option.value;
+      }
+    }
+    return null;
+  }
+
+  double? _parseAspectRatioInput(String raw) {
+    final input = raw.trim();
+    if (input.isEmpty) {
+      return null;
+    }
+    if (input.contains(':')) {
+      final parts = input.split(':');
+      if (parts.length != 2) {
+        return null;
+      }
+      final left = double.tryParse(parts.first.trim());
+      final right = double.tryParse(parts.last.trim());
+      if (left == null || right == null || left <= 0 || right <= 0) {
+        return null;
+      }
+      return left / right;
+    }
+    final direct = double.tryParse(input);
+    if (direct == null || direct <= 0) {
+      return null;
+    }
+    return direct;
+  }
+
+  String _formatAspectRatioValue(double ratio) {
+    return ratio.toStringAsFixed(3).replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
+  String _formatAspectRatioLabel(double ratio) {
+    for (final option in _aspectRatioOptions) {
+      if ((option.value - ratio).abs() < 0.001) {
+        return option.label;
+      }
+    }
+    return _formatAspectRatioValue(ratio);
   }
 
   Future<void> _showBatchEditSheet(
@@ -967,8 +1153,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                             _BatchFieldKind.text => valueController.text.trim(),
                             _BatchFieldKind.number =>
                               int.tryParse(valueController.text.trim()) ??
-                                  double.tryParse(valueController.text.trim())
-                                      ?.round() ??
+                                  double.tryParse(
+                                    valueController.text.trim(),
+                                  )?.round() ??
                                   0,
                             _BatchFieldKind.select => selectedEnumValue,
                           };
@@ -1047,7 +1234,6 @@ class _EditorToolbar extends StatelessWidget {
     required this.onOpenBatchEdit,
     required this.onOpenBoardSettings,
     required this.onOpenColumnSettings,
-    required this.onCreateCustomColumn,
   });
 
   final int shotCount;
@@ -1064,134 +1250,210 @@ class _EditorToolbar extends StatelessWidget {
   final VoidCallback? onOpenBatchEdit;
   final VoidCallback onOpenBoardSettings;
   final VoidCallback onOpenColumnSettings;
-  final VoidCallback onCreateCustomColumn;
 
   @override
   Widget build(BuildContext context) {
-    return SurfaceCard(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      child: Row(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 1520;
+        final dense = constraints.maxWidth < 1320;
+        final summaryStyle = theme.textTheme.bodySmall;
+
+        return SurfaceCard(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Column(
             children: [
-              Text('分镜制作', style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 4),
-              Text(
-                '桌面工作台 · $shotCount 镜头 · ${totalDuration}s',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
+              Row(
                 children: [
-                  IconButton.filledTonal(
-                    tooltip: '撤销',
-                    onPressed: canUndo ? onUndo : null,
-                    icon: const Icon(Icons.undo_rounded),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filledTonal(
-                    tooltip: '重做',
-                    onPressed: canRedo ? onRedo : null,
-                    icon: const Icon(Icons.redo_rounded),
-                  ),
-                  const SizedBox(width: 12),
-                  FilledButton.icon(
-                    onPressed: onCreateShot,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('新建镜头'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onToggleBatchMode,
-                    icon: const Icon(Icons.checklist_rtl_rounded),
-                    label: Text(isBatchMode ? '退出批量' : '批量模式'),
-                  ),
-                  const SizedBox(width: 8),
-                  PopupMenuButton<_SelectionAction>(
-                    enabled: isBatchMode,
-                    onSelected: onChooseSelection,
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(
-                        value: _SelectionAction.selectAll,
-                        child: Text('全选'),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          Text('分镜制作', style: theme.textTheme.titleSmall),
+                          const SizedBox(width: 6),
+                          Text('$shotCount 镜头', style: summaryStyle),
+                          const SizedBox(width: 6),
+                          Text('${totalDuration}s', style: summaryStyle),
+                          if (isBatchMode) ...[
+                            const SizedBox(width: 6),
+                            Text('已选 $selectedCount', style: summaryStyle),
+                          ],
+                          SizedBox(width: dense ? 10 : 12),
+                          _ToolbarPillButton(
+                            icon: Icons.checklist_rtl_rounded,
+                            label: isBatchMode ? '退出批量' : '批量',
+                            onPressed: onToggleBatchMode,
+                          ),
+                          const SizedBox(width: 6),
+                          PopupMenuButton<_SelectionAction>(
+                            tooltip: '选择镜头',
+                            onSelected: onChooseSelection,
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: _SelectionAction.selectAll,
+                                child: Text('全选'),
+                              ),
+                              PopupMenuItem(
+                                value: _SelectionAction.invert,
+                                child: Text('反选'),
+                              ),
+                              PopupMenuItem(
+                                value: _SelectionAction.clear,
+                                child: Text('清空选择'),
+                              ),
+                            ],
+                            child: _ToolbarPillButton(
+                              icon: Icons.ads_click_rounded,
+                              label: selectedCount > 0
+                                  ? '选择($selectedCount)'
+                                  : '选择',
+                            ),
+                          ),
+                          if (isBatchMode) ...[
+                            const SizedBox(width: 6),
+                            _ToolbarPillButton(
+                              icon: Icons.edit_note_rounded,
+                              label: '批量填值',
+                              onPressed: onOpenBatchEdit,
+                            ),
+                          ],
+                          SizedBox(width: compact ? 6 : 8),
+                          _ToolbarDivider(),
+                          SizedBox(width: compact ? 6 : 8),
+                          _ToolbarPillButton(
+                            icon: Icons.view_compact_alt_rounded,
+                            label: '分镜设置',
+                            onPressed: onOpenBoardSettings,
+                          ),
+                          const SizedBox(width: 6),
+                          _ToolbarPillButton(
+                            icon: Icons.view_column_rounded,
+                            label: '列设置',
+                            onPressed: onOpenColumnSettings,
+                          ),
+                        ],
                       ),
-                      PopupMenuItem(
-                        value: _SelectionAction.invert,
-                        child: Text('反选'),
-                      ),
-                      PopupMenuItem(
-                        value: _SelectionAction.clear,
-                        child: Text('清空选择'),
-                      ),
-                    ],
-                    child: OutlinedButton.icon(
-                      onPressed: null,
-                      icon: const Icon(Icons.ads_click_rounded),
-                      label: Text('选择${isBatchMode ? "($selectedCount)" : ""}'),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onOpenBatchEdit,
-                    icon: const Icon(Icons.edit_note_rounded),
-                    label: const Text('批量填值'),
+                  _ToolbarIconButton(
+                    tooltip: '撤销',
+                    icon: Icons.undo_rounded,
+                    onPressed: canUndo ? onUndo : null,
                   ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onOpenBoardSettings,
-                    icon: const Icon(Icons.view_compact_alt_rounded),
-                    label: const Text('分镜设置'),
+                  const SizedBox(width: 6),
+                  _ToolbarIconButton(
+                    tooltip: '重做',
+                    icon: Icons.redo_rounded,
+                    onPressed: canRedo ? onRedo : null,
                   ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onOpenColumnSettings,
-                    icon: const Icon(Icons.view_column_rounded),
-                    label: const Text('列设置'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onCreateCustomColumn,
-                    icon: const Icon(Icons.add_box_outlined),
-                    label: const Text('+ 自定义列'),
+                  const SizedBox(width: 6),
+                  FilledButton.icon(
+                    onPressed: onCreateShot,
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: const Text('新建镜头'),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      minimumSize: const Size(0, 28),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-class _FooterChip extends StatelessWidget {
-  const _FooterChip({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
+class _ToolbarDivider extends StatelessWidget {
+  const _ToolbarDivider();
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context)
-            .colorScheme
-            .surfaceContainerHighest
-            .withValues(alpha: 0.38),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text('$label  $value'),
+    return Container(
+      width: 1,
+      height: 28,
+      color: Theme.of(context).dividerColor.withValues(alpha: 0.75),
+    );
+  }
+}
+
+class _ToolbarIconButton extends StatelessWidget {
+  const _ToolbarIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton.filledTonal(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+    );
+  }
+}
+
+class _ToolbarPillButton extends StatelessWidget {
+  const _ToolbarPillButton({
+    required this.icon,
+    required this.label,
+    this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final scheme = Theme.of(context).colorScheme;
+    final borderColor = enabled ? scheme.outlineVariant : scheme.outlineVariant;
+    final textStyle = Theme.of(context).textTheme.labelLarge;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+          decoration: BoxDecoration(
+            border: Border.all(color: borderColor),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: enabled ? null : scheme.outline),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: textStyle?.copyWith(
+                  color: enabled ? null : scheme.outline,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

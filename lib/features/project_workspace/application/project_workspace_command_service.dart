@@ -50,7 +50,9 @@ class ProjectWorkspaceCommandService {
     commandBus.register<AddFixedFieldOptionCommand>(_handleAddFixedFieldOption);
     commandBus.register<CreatePlanSectionCommand>(_handleCreatePlanSection);
     commandBus.register<RenamePlanSectionCommand>(_handleRenamePlanSection);
+    commandBus.register<DeletePlanSectionCommand>(_handleDeletePlanSection);
     commandBus.register<ReorderPlanSectionShotsCommand>(_handleReorderPlanSectionShots);
+    commandBus.register<UnassignShotFromPlanCommand>(_handleUnassignShotFromPlan);
   }
 
   Future<void> createShot(String projectId) async {
@@ -257,6 +259,30 @@ class ProjectWorkspaceCommandService {
     );
   }
 
+  Future<void> deleteFixedFieldOption({
+    required String projectId,
+    required String fieldKey,
+    required String option,
+  }) async {
+    await workspaceRepository.deleteFixedFieldCustomOption(
+      projectId: projectId,
+      fieldKey: fieldKey,
+      option: option,
+    );
+  }
+
+  Future<void> deleteCustomColumnOption({
+    required String projectId,
+    required String columnId,
+    required String option,
+  }) async {
+    await workspaceRepository.deleteCustomColumnOption(
+      projectId: projectId,
+      columnId: columnId,
+      option: option,
+    );
+  }
+
   Future<void> createPlanSection(String projectId, String name) async {
     await commandBus.dispatch(
       CreatePlanSectionCommand(projectId: projectId, name: name),
@@ -277,6 +303,18 @@ class ProjectWorkspaceCommandService {
     );
   }
 
+  Future<void> deletePlanSection({
+    required String projectId,
+    required String sectionId,
+  }) async {
+    await commandBus.dispatch(
+      DeletePlanSectionCommand(
+        projectId: projectId,
+        sectionId: sectionId,
+      ),
+    );
+  }
+
   Future<void> reorderPlanSectionShots({
     required String projectId,
     required String sectionId,
@@ -288,6 +326,15 @@ class ProjectWorkspaceCommandService {
         sectionId: sectionId,
         orderedShotIds: orderedShotIds,
       ),
+    );
+  }
+
+  Future<void> unassignShotFromPlan({
+    required String projectId,
+    required String shotId,
+  }) async {
+    await commandBus.dispatch(
+      UnassignShotFromPlanCommand(projectId: projectId, shotId: shotId),
     );
   }
 
@@ -1005,6 +1052,50 @@ class ProjectWorkspaceCommandService {
     );
   }
 
+  Future<CommandResult> _handleDeletePlanSection(
+    DeletePlanSectionCommand command,
+  ) async {
+    final board = await workspaceRepository.loadPlanBoard(command.projectId);
+    final section = board.sections.firstWhere((item) => item.id == command.sectionId);
+    final orderIndex = board.sections.indexWhere((item) => item.id == command.sectionId);
+    await workspaceRepository.deletePlanSection(command.projectId, command.sectionId);
+    return CommandResult(
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () async {
+          await workspaceRepository.createPlanSection(
+            command.projectId,
+            PlanSection(
+              id: section.id,
+              name: section.name,
+              orderIndex: orderIndex < 0 ? 0 : orderIndex,
+              shotIds: const [],
+            ),
+          );
+          for (final shotId in section.shotIds) {
+            await workspaceRepository.assignShotToSection(
+              command.projectId,
+              shotId,
+              section.id,
+            );
+          }
+          if (section.shotIds.isNotEmpty) {
+            await workspaceRepository.reorderSectionShots(
+              command.projectId,
+              section.id,
+              section.shotIds,
+            );
+          }
+        },
+        redo: () => workspaceRepository.deletePlanSection(
+          command.projectId,
+          command.sectionId,
+        ),
+      ),
+    );
+  }
+
   Future<CommandResult> _handleReorderPlanSectionShots(
     ReorderPlanSectionShotsCommand command,
   ) async {
@@ -1029,6 +1120,32 @@ class ProjectWorkspaceCommandService {
           command.projectId,
           command.sectionId,
           command.orderedShotIds,
+        ),
+      ),
+    );
+  }
+
+  Future<CommandResult> _handleUnassignShotFromPlan(
+    UnassignShotFromPlanCommand command,
+  ) async {
+    final board = await workspaceRepository.loadPlanBoard(command.projectId);
+    final previousSectionId = _findShotSectionId(board, command.shotId);
+    if (previousSectionId == null) {
+      return const CommandResult();
+    }
+    await workspaceRepository.unassignShot(command.projectId, command.shotId);
+    return CommandResult(
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () => workspaceRepository.assignShotToSection(
+          command.projectId,
+          command.shotId,
+          previousSectionId,
+        ),
+        redo: () => workspaceRepository.unassignShot(
+          command.projectId,
+          command.shotId,
         ),
       ),
     );
