@@ -1,6 +1,10 @@
 # VisionDraft
 
 <p align="center">
+  <img src="./assets/branding/default_logo.png" alt="VisionDraft Logo" width="96" height="96" />
+</p>
+
+<p align="center">
   面向 Windows 桌面的本地优先分镜策划与拍摄前统筹软件。
 </p>
 

@@ -1,6 +1,10 @@
 # VisionDraft
 
 <p align="center">
+  <img src="./assets/branding/default_logo.png" alt="VisionDraft Logo" width="96" height="96" />
+</p>
+
+<p align="center">
   Local-first storyboard planning and shooting preparation software for Windows desktop.
 </p>
 
