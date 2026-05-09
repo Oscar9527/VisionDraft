@@ -219,6 +219,18 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                     );
                   },
                 ),
+          onOpenBatchRowHeight: _selectedShotIds.isEmpty
+              ? null
+              : () => _showBatchRowHeightSheet(
+                  context,
+                  selectedShotIds: _selectedShotIds.toList(),
+                  currentRowHeights: gridSession.rowHeightsByShotId,
+                  onApply: (height) =>
+                      gridSessionController.setRowHeights(
+                        _selectedShotIds,
+                        height,
+                      ),
+                ),
           onOpenBoardSettings: () => _showBoardSettingsSheet(
             context,
             preset: snapshot.boardPreset,
@@ -1210,6 +1222,117 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     );
   }
 
+  Future<void> _showBatchRowHeightSheet(
+    BuildContext context, {
+    required List<String> selectedShotIds,
+    required Map<String, double> currentRowHeights,
+    required ValueChanged<double> onApply,
+  }) async {
+    final explicitHeights = selectedShotIds
+        .map((shotId) => currentRowHeights[shotId])
+        .whereType<double>()
+        .toList();
+    final initialHeight = explicitHeights.isEmpty
+        ? 108.0
+        : explicitHeights.reduce((sum, value) => sum + value) /
+            explicitHeights.length;
+    final controller = TextEditingController(
+      text: initialHeight.toStringAsFixed(0),
+    );
+    var currentHeight = initialHeight.clamp(84.0, 280.0);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return _SideSheet(
+              title: '批量调整行高',
+              width: 420,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '已选 ${selectedShotIds.length} 行。输入统一高度，或直接拖动任意已选中行的底边批量调整。',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: '统一行高',
+                      suffixText: 'px',
+                    ),
+                    onChanged: (value) {
+                      final parsed = double.tryParse(value.trim());
+                      if (parsed == null) {
+                        return;
+                      }
+                      setSheetState(() {
+                        currentHeight = parsed.clamp(84.0, 280.0);
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 18),
+                  Slider(
+                    value: currentHeight,
+                    min: 84,
+                    max: 280,
+                    divisions: 28,
+                    label: currentHeight.toStringAsFixed(0),
+                    onChanged: (value) {
+                      setSheetState(() {
+                        currentHeight = value;
+                        controller.text = value.toStringAsFixed(0);
+                      });
+                    },
+                  ),
+                  Row(
+                    children: [
+                      Text('84'),
+                      const Spacer(),
+                      Text(
+                        '当前 ${currentHeight.toStringAsFixed(0)}',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const Spacer(),
+                      Text('280'),
+                    ],
+                  ),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        child: const Text('取消'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () {
+                          final parsed =
+                              double.tryParse(controller.text.trim()) ??
+                              currentHeight;
+                          onApply(parsed.clamp(84.0, 280.0));
+                          Navigator.of(sheetContext).pop();
+                        },
+                        child: const Text('应用'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<String?> _showNamePrompt(
     BuildContext context, {
     required String title,
@@ -1265,6 +1388,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.onToggleBatchMode,
     required this.onChooseSelection,
     required this.onOpenBatchEdit,
+    required this.onOpenBatchRowHeight,
     required this.onOpenBoardSettings,
     required this.onOpenColumnSettings,
   });
@@ -1282,6 +1406,7 @@ class _EditorToolbar extends StatelessWidget {
   final VoidCallback onToggleBatchMode;
   final ValueChanged<_SelectionAction> onChooseSelection;
   final VoidCallback? onOpenBatchEdit;
+  final VoidCallback? onOpenBatchRowHeight;
   final VoidCallback onOpenBoardSettings;
   final VoidCallback onOpenColumnSettings;
 
@@ -1351,6 +1476,12 @@ class _EditorToolbar extends StatelessWidget {
                               icon: Icons.edit_note_rounded,
                               label: '批量填值',
                               onPressed: onOpenBatchEdit,
+                            ),
+                            const SizedBox(width: 6),
+                            _ToolbarPillButton(
+                              icon: Icons.height_rounded,
+                              label: '批量行高',
+                              onPressed: onOpenBatchRowHeight,
                             ),
                           ],
                           SizedBox(width: compact ? 6 : 8),

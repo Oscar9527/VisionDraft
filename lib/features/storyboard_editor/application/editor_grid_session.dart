@@ -104,6 +104,14 @@ class EditorGridSessionController
     );
   }
 
+  void setRowHeights(Iterable<String> shotIds, double height) {
+    final next = <String, double>{...state.rowHeightsByShotId};
+    for (final shotId in shotIds) {
+      next[shotId] = height;
+    }
+    state = state.copyWith(rowHeightsByShotId: next);
+  }
+
   void setFocusedCell(FocusedGridCell? cell) {
     if (cell == null) {
       state = state.copyWith(clearFocusedCell: true);

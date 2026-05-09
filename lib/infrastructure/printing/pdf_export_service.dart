@@ -943,29 +943,14 @@ class PdfExportService {
     required Map<String, double> desiredWidths,
     required double targetWidth,
   }) {
-    final minWidths = {
-      for (final fieldKey in visibleFields)
-        fieldKey: _sheetColumnMinWidth(payload, fieldKey),
-    };
-    final minWidthTotal = minWidths.values.fold<double>(0, (sum, value) => sum + value);
-    if (minWidthTotal >= targetWidth) {
-      final scale = targetWidth / math.max(minWidthTotal, 1);
-      return {
-        for (final fieldKey in visibleFields) fieldKey: minWidths[fieldKey]! * scale,
-      };
-    }
-
-    final remaining = targetWidth - minWidthTotal;
-    final weightTotal = visibleFields.fold<double>(
+    final desiredWidthTotal = visibleFields.fold<double>(
       0,
       (sum, fieldKey) => sum + math.max(1.0, desiredWidths[fieldKey] ?? 1.0),
     );
+    final scale = targetWidth / math.max(desiredWidthTotal, 1);
     return {
       for (final fieldKey in visibleFields)
-        fieldKey:
-            minWidths[fieldKey]! +
-            remaining *
-                (math.max(1.0, desiredWidths[fieldKey] ?? 1.0) / math.max(weightTotal, 1)),
+        fieldKey: math.max(1.0, desiredWidths[fieldKey] ?? 1.0) * scale,
     };
   }
 
@@ -978,75 +963,25 @@ class PdfExportService {
     if (payload.shots.isEmpty) {
       return const {};
     }
-
-    final minRowHeight = hasImage ? 24.0 : 18.0;
-    final minTotal = minRowHeight * payload.shots.length;
-    if (minTotal >= targetHeight) {
-      final scaledHeight = targetHeight / payload.shots.length;
-      return {
-        for (final shot in payload.shots) shot.id: scaledHeight,
-      };
-    }
-
-    final remaining = targetHeight - minTotal;
-    final weights = {
-      for (final shot in payload.shots)
-        shot.id: _shotRowWeight(
-          shot,
-          desiredHeights[shot.id] ?? minRowHeight,
-          hasImage: hasImage,
-        ),
-    };
-    final weightTotal = weights.values.fold<double>(0, (sum, value) => sum + value);
+    final desiredHeightTotal = payload.shots.fold<double>(
+      0,
+      (sum, shot) =>
+          sum +
+          math.max(
+            1.0,
+            desiredHeights[shot.id] ?? (hasImage ? 108.0 : 76.0),
+          ),
+    );
+    final scale = targetHeight / math.max(desiredHeightTotal, 1);
     return {
       for (final shot in payload.shots)
         shot.id:
-            minRowHeight +
-            remaining * ((weights[shot.id] ?? 1.0) / math.max(weightTotal, 1)),
+            math.max(
+              1.0,
+              desiredHeights[shot.id] ?? (hasImage ? 108.0 : 76.0),
+            ) *
+            scale,
     };
-  }
-
-  double _sheetColumnMinWidth(ExportPayload payload, String fieldKey) {
-    return switch (fieldKey) {
-      'shotNo' => 38,
-      'durationSec' => 34,
-      'shotSize' => 44,
-      'cameraAngle' || 'cameraMove' => 56,
-      'cameraRig' => 62,
-      'focalLength' => 52,
-      'content' => 110,
-      'dialogue' || 'notes' || 'sceneExpectation' => 92,
-      'audio' => 82,
-      'frameImage' => 96,
-      'referenceImage' => 88,
-      _ when _isImageField(payload, fieldKey) => 88,
-      _ => 76,
-    }.toDouble();
-  }
-
-  double _shotRowWeight(
-    ShotRecord shot,
-    double desiredHeight, {
-    required bool hasImage,
-  }) {
-    final textLength =
-        shot.content.length +
-        shot.dialogue.length +
-        shot.notes.length +
-        shot.sceneExpectation.length +
-        shot.audio.length +
-        shot.customFieldValues.values
-            .whereType<String>()
-            .fold<int>(0, (sum, value) => sum + value.length);
-    final normalizedDesired = desiredHeight / (hasImage ? 88.0 : 64.0);
-    final textWeight = math.min(2.4, textLength / 100);
-    final imageWeight =
-        shot.frameImage != null ||
-            shot.referenceImage != null ||
-            shot.customFieldValues.values.any((value) => value is AssetRef)
-        ? 0.7
-        : (hasImage ? 0.28 : 0.0);
-    return math.max(1.0, normalizedDesired) + textWeight + imageWeight;
   }
 }
 

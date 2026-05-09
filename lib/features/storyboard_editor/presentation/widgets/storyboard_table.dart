@@ -430,9 +430,8 @@ class _StoryboardTableState extends State<StoryboardTable> {
                                 initialHeight: rowHeight,
                                 minHeight: _minimumRowHeight,
                                 maxHeight: _maximumRowHeight,
-                                onHeightChanged: (height) => widget
-                                    .onRowHeightChanged
-                                    ?.call(shot.id, height),
+                                onHeightChanged: (height) =>
+                                    _applyRowHeightChange(shot.id, height),
                               ),
                             ],
                           ),
@@ -869,6 +868,22 @@ class _StoryboardTableState extends State<StoryboardTable> {
       _requestCellFocus(target);
     });
   }
+
+  void _applyRowHeightChange(String shotId, double height) {
+    final onRowHeightChanged = widget.onRowHeightChanged;
+    if (onRowHeightChanged == null) {
+      return;
+    }
+    if (widget.isBatchMode &&
+        widget.selectedShotIds.length > 1 &&
+        widget.selectedShotIds.contains(shotId)) {
+      for (final selectedShotId in widget.selectedShotIds) {
+        onRowHeightChanged(selectedShotId, height);
+      }
+      return;
+    }
+    onRowHeightChanged(shotId, height);
+  }
 }
 
 enum _ColumnAction { hide, moveLeft, moveRight, rename, delete }
@@ -895,7 +910,9 @@ class _LeadingHeaderCell extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Tooltip(
-        message: isBatchMode ? '选择当前行镜头' : '拖动当前行调整镜头顺序',
+        message: isBatchMode
+            ? '选择当前行镜头。拖动已选中行的底边，可批量调整这些行的高度'
+            : '拖动当前行调整镜头顺序',
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
