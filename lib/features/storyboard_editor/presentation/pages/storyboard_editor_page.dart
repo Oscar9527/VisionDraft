@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/bootstrap/providers.dart';
@@ -258,8 +258,23 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             onUpdateField: controller.updateShotField,
             onImportAsset: controller.importAsset,
             onRelinkAsset: controller.relinkAsset,
-            onAddColumn: () async =>
-                _openColumnSettings(context, controller, snapshot),
+            onInsertRowAbove: (rowIndex) =>
+                controller.createShot(insertIndex: rowIndex),
+            onInsertRowBelow: (rowIndex) =>
+                controller.createShot(insertIndex: rowIndex + 1),
+            onDeleteRow: controller.deleteShot,
+            onAddColumn: () async => _showCreateCustomColumnSheet(
+              context,
+              onSubmit: ({
+                required name,
+                required type,
+                enumSource,
+              }) => controller.createCustomColumn(
+                name: name,
+                type: type,
+                enumSource: enumSource,
+              ),
+            ),
             onHideColumn: (fieldKey) async {
               final nextVisible = snapshot.columnPreset.visibleFieldKeys
                   .where((key) => key != fieldKey)
@@ -379,6 +394,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                               CustomColumnType.text => '文本',
                               CustomColumnType.number => '数字',
                               CustomColumnType.singleSelect => '单选',
+                              CustomColumnType.image => '图片',
                             }),
                           ),
                         )
@@ -667,6 +683,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                                   CustomColumnType.number => '数字',
                                   CustomColumnType.singleSelect =>
                                     '单选 · ${custom.enumSource?.label ?? ''}',
+                                  CustomColumnType.image => '图片',
                                 }),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1072,6 +1089,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
       );
 
       for (final column in customColumns) {
+        if (column.type == CustomColumnType.image) {
+          continue;
+        }
         yield _BatchFieldOption(
           key: column.fieldKey,
           label: column.name,
@@ -1079,6 +1099,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             CustomColumnType.text => _BatchFieldKind.text,
             CustomColumnType.number => _BatchFieldKind.number,
             CustomColumnType.singleSelect => _BatchFieldKind.select,
+            CustomColumnType.image => _BatchFieldKind.text,
           },
           values: column.options,
         );

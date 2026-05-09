@@ -50,12 +50,29 @@ class ProjectWorkspaceController
     }
   }
 
-  Future<void> createShot() async {
+  Future<void> createShot({int? insertIndex}) async {
     final created = await ref
         .read(workspaceCommandServiceProvider)
-        .createShot(arg);
+        .createShot(arg, insertIndex: insertIndex);
+    final nextShots = [...state.shots];
+    final targetIndex =
+        insertIndex?.clamp(0, nextShots.length) ?? created.orderIndex;
+    nextShots.insert(targetIndex, created);
     state = state.copyWith(
-      shots: [...state.shots, created],
+      shots: _normalizeOrderIndexes(nextShots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> deleteShot(String shotId) async {
+    await ref
+        .read(workspaceCommandServiceProvider)
+        .deleteShot(projectId: arg, shotId: shotId);
+    state = state.copyWith(
+      shots: _normalizeOrderIndexes(
+        state.shots.where((shot) => shot.id != shotId).toList(),
+      ),
       isLoading: false,
       clearError: true,
     );
@@ -399,11 +416,11 @@ class ProjectWorkspaceController
           orderIndex: state.shots.length + index,
         ),
     ];
-    final createdShots = await ref
+    final importedShots = await ref
         .read(workspaceCommandServiceProvider)
         .importSeedShotsBatch(arg, seedShots: seedShots);
     state = state.copyWith(
-      shots: [...state.shots, ...createdShots],
+      shots: importedShots,
       isLoading: false,
       clearError: true,
     );
@@ -458,6 +475,13 @@ class ProjectWorkspaceController
     }
     final byId = {for (final shot in nextShots) shot.id: shot};
     return [for (final current in state.shots) byId[current.id] ?? current];
+  }
+
+  List<ShotRecord> _normalizeOrderIndexes(List<ShotRecord> shots) {
+    return [
+      for (final entry in shots.asMap().entries)
+        entry.value.copyWith(orderIndex: entry.key),
+    ];
   }
 
   ShotRecord _seedShotFromAiDraft(

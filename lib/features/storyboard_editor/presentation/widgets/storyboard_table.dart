@@ -35,6 +35,8 @@ typedef ShotAssetRelinker =
       required String targetField,
       required String newPath,
     });
+typedef RowActionRequested = Future<void> Function(int rowIndex);
+typedef DeleteRowRequested = Future<void> Function(String shotId);
 
 typedef AddColumnRequested = Future<void> Function();
 typedef ColumnActionRequested = Future<void> Function(String fieldKey);
@@ -67,6 +69,9 @@ class StoryboardTable extends StatefulWidget {
     required this.onUpdateField,
     required this.onImportAsset,
     required this.onRelinkAsset,
+    required this.onInsertRowAbove,
+    required this.onInsertRowBelow,
+    required this.onDeleteRow,
     required this.onAddColumn,
     required this.onHideColumn,
     required this.onMoveColumnLeft,
@@ -99,6 +104,9 @@ class StoryboardTable extends StatefulWidget {
   final ShotFieldUpdater onUpdateField;
   final ShotAssetImporter onImportAsset;
   final ShotAssetRelinker onRelinkAsset;
+  final RowActionRequested onInsertRowAbove;
+  final RowActionRequested onInsertRowBelow;
+  final DeleteRowRequested onDeleteRow;
   final AddColumnRequested onAddColumn;
   final ColumnActionRequested onHideColumn;
   final ColumnActionRequested onMoveColumnLeft;
@@ -129,7 +137,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
   bool _syncingContent = false;
 
   double get _uiScale => widget.zoomPercent / 100;
-  double get _leadingWidth => 54;
+  double get _leadingWidth => 64;
   double get _trailingWidth => 40;
 
   @override
@@ -483,6 +491,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
     return ReorderableDragStartListener(
       index: index,
       child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
           border: Border(
             right: BorderSide(
@@ -490,30 +499,75 @@ class _StoryboardTableState extends State<StoryboardTable> {
             ),
           ),
         ),
-        child: Center(
-          child: Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest
-                  .withValues(
-                    alpha: Theme.of(context).brightness == Brightness.dark
-                        ? 0.5
-                        : 0.32,
-                  ),
-              shape: BoxShape.circle,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest
+                    .withValues(
+                      alpha: Theme.of(context).brightness == Brightness.dark
+                          ? 0.5
+                          : 0.32,
+                    ),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.drag_indicator_rounded,
+                size: 15,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
-            child: Icon(
-              Icons.drag_indicator_rounded,
-              size: 15,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            PopupMenuButton<_RowAction>(
+              tooltip: '行操作',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+              onSelected: (action) async {
+                switch (action) {
+                  case _RowAction.insertAbove:
+                    await widget.onInsertRowAbove(index);
+                  case _RowAction.insertBelow:
+                    await widget.onInsertRowBelow(index);
+                  case _RowAction.deleteRow:
+                    await widget.onDeleteRow(shot.id);
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: _RowAction.insertAbove,
+                  child: SizedBox(width: 140, child: Text('上方插入一行')),
+                ),
+                PopupMenuItem(
+                  value: _RowAction.insertBelow,
+                  child: SizedBox(width: 140, child: Text('下方插入一行')),
+                ),
+                PopupMenuItem(
+                  value: _RowAction.deleteRow,
+                  child: SizedBox(width: 140, child: Text('删除本行')),
+                ),
+              ],
+              icon: Icon(
+                Icons.more_vert_rounded,
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
+  bool _isImageFieldKey(String fieldKey) {
+    if (fixedFieldIsImage(fieldKey)) {
+      return true;
+    }
+    final custom = _findCustomColumn(fieldKey);
+    return custom?.type == CustomColumnType.image;
+  }
+ 
   List<String> _buildVisibleFieldKeys() {
     final visible = widget.columnPreset.visibleFieldKeys.toSet();
     final validFieldKeys = _validFieldKeys();
@@ -591,12 +645,16 @@ class _StoryboardTableState extends State<StoryboardTable> {
   }
 
   double _defaultColumnWidth(String fieldKey) {
+    final custom = _findCustomColumn(fieldKey);
+    if (custom?.type == CustomColumnType.image) {
+      return _clampDouble(220, _minimumColumnWidth(fieldKey), _maximumColumnWidth(fieldKey));
+    }
     final base = switch (fieldKey) {
       'shotNo' => 92.0,
       'durationSec' => 84.0,
       'shotSize' => 100.0,
-      'frameImage' => 168.0,
-      'referenceImage' => 150.0,
+      'frameImage' => 260.0,
+      'referenceImage' => 220.0,
       'content' => 230.0,
       'dialogue' => 164.0,
       'notes' => 172.0,
@@ -624,12 +682,16 @@ class _StoryboardTableState extends State<StoryboardTable> {
   }
 
   double _baseMinimumColumnWidth(String fieldKey) {
+    final custom = _findCustomColumn(fieldKey);
+    if (custom?.type == CustomColumnType.image) {
+      return 180.0;
+    }
     return switch (fieldKey) {
       'shotNo' => 90.0,
       'durationSec' => 92.0,
       'shotSize' => 108.0,
-      'frameImage' => 170.0,
-      'referenceImage' => 156.0,
+      'frameImage' => 180.0,
+      'referenceImage' => 180.0,
       'content' => 188.0,
       'dialogue' => 156.0,
       'notes' => 148.0,
@@ -644,13 +706,17 @@ class _StoryboardTableState extends State<StoryboardTable> {
   }
 
   double _maximumColumnWidth(String fieldKey) {
+    final custom = _findCustomColumn(fieldKey);
+    if (custom?.type == CustomColumnType.image) {
+      return 420.0;
+    }
     final base = switch (fieldKey) {
       'content' ||
       'dialogue' ||
       'notes' ||
       'sceneExpectation' ||
       'audio' => 520.0,
-      'frameImage' || 'referenceImage' => 360.0,
+      'frameImage' || 'referenceImage' => 420.0,
       _ => 300.0,
     };
     return math.max(base, _minimumColumnWidth(fieldKey));
@@ -720,6 +786,9 @@ class _StoryboardTableState extends State<StoryboardTable> {
   }
 
   bool _prefersWidthExpansion(String fieldKey) {
+    if (_isImageFieldKey(fieldKey)) {
+      return true;
+    }
     return switch (fieldKey) {
       'frameImage' ||
       'referenceImage' ||
@@ -803,6 +872,8 @@ class _StoryboardTableState extends State<StoryboardTable> {
 }
 
 enum _ColumnAction { hide, moveLeft, moveRight, rename, delete }
+
+enum _RowAction { insertAbove, insertBelow, deleteRow }
 
 class _LeadingHeaderCell extends StatelessWidget {
   const _LeadingHeaderCell({required this.width, required this.isBatchMode});
@@ -1068,7 +1139,7 @@ class _HeaderCellState extends State<_HeaderCell> {
               ),
             ),
             PopupMenuButton<_ColumnAction>(
-              tooltip: '',
+              tooltip: '列操作',
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 26, height: 26),
               onSelected: widget.onAction,
@@ -1076,25 +1147,25 @@ class _HeaderCellState extends State<_HeaderCell> {
                 if (!widget.isShotNo)
                   const PopupMenuItem(
                     value: _ColumnAction.hide,
-                    child: Text('隐藏此列'),
+                    child: SizedBox(width: 140, child: Text('隐藏此列')),
                   ),
                 const PopupMenuItem(
                   value: _ColumnAction.moveLeft,
-                  child: Text('左移'),
+                  child: SizedBox(width: 140, child: Text('左移')),
                 ),
                 const PopupMenuItem(
                   value: _ColumnAction.moveRight,
-                  child: Text('右移'),
+                  child: SizedBox(width: 140, child: Text('右移')),
                 ),
                 if (widget.customColumn != null)
                   const PopupMenuItem(
                     value: _ColumnAction.rename,
-                    child: Text('重命名'),
+                    child: SizedBox(width: 140, child: Text('重命名')),
                   ),
                 if (widget.customColumn != null)
                   const PopupMenuItem(
                     value: _ColumnAction.delete,
-                    child: Text('删除列'),
+                    child: SizedBox(width: 140, child: Text('删除列')),
                   ),
               ],
               icon: Icon(
@@ -1328,6 +1399,9 @@ class _EditableCellState extends State<_EditableCell> {
   String get _stringValue {
     final custom = _customColumn;
     if (custom != null) {
+      if (custom.type == CustomColumnType.image) {
+        return '';
+      }
       return widget.shot.customFieldValues[custom.fieldKey]?.toString() ?? '';
     }
 
@@ -1350,7 +1424,12 @@ class _EditableCellState extends State<_EditableCell> {
     };
   }
 
-  bool get _isImageField => fixedFieldIsImage(widget.fieldKey);
+  bool get _isImageField {
+    if (fixedFieldIsImage(widget.fieldKey)) {
+      return true;
+    }
+    return _customColumn?.type == CustomColumnType.image;
+  }
 
   bool get _isDropdownField {
     if (_customColumn case final custom?) {
@@ -1374,7 +1453,7 @@ class _EditableCellState extends State<_EditableCell> {
   }
 
   double get _imagePreviewHeight {
-    return _clampDouble(widget.height - 24, 40, widget.height - 20);
+    return _clampDouble(widget.height - 8, 64, widget.height - 4);
   }
 
   List<String> get _options {
@@ -1587,9 +1666,13 @@ class _EditableCellState extends State<_EditableCell> {
 
   Widget _buildContent(BuildContext context) {
     if (_isImageField) {
-      final asset = widget.fieldKey == ShotFieldKey.frameImage.storageKey
-          ? widget.shot.frameImage
-          : widget.shot.referenceImage;
+      final asset = switch (widget.fieldKey) {
+        final key when key == ShotFieldKey.frameImage.storageKey =>
+          widget.shot.frameImage,
+        final key when key == ShotFieldKey.referenceImage.storageKey =>
+          widget.shot.referenceImage,
+        _ => widget.shot.customFieldValues[widget.fieldKey] as AssetRef?,
+      };
       return _ImageFieldCell(
         asset: asset,
         previewHeight: _imagePreviewHeight,
@@ -1923,7 +2006,7 @@ double _clampDouble(double value, double min, double max) {
   return math.min(math.max(value, min), max);
 }
 
-const _defaultRowHeight = 94.0;
-const _minimumRowHeight = 72.0;
+const _defaultRowHeight = 108.0;
+const _minimumRowHeight = 84.0;
 const _maximumRowHeight = 280.0;
 const _customOptionSentinel = '__custom_option__';

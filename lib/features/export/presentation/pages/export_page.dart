@@ -605,15 +605,9 @@ class _ExportPreviewPanel extends StatelessWidget {
                   canDebug: false,
                   useActions: false,
                   shouldRepaint: true,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
-                  ),
-                  previewPageMargin: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
-                  ),
-                  maxPageWidth: 1200,
+                  padding: EdgeInsets.zero,
+                  previewPageMargin: EdgeInsets.zero,
+                  maxPageWidth: 1800,
                   loadingWidget: const Center(
                     child: CircularProgressIndicator(),
                   ),

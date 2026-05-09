@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -89,26 +90,41 @@ class PdfExportService {
     ExportPayload payload,
     pw.MemoryImage? brandingLogo,
   ) async {
-    final sourceOrder = payload.effectiveFieldOrderKeys.isNotEmpty
-        ? payload.effectiveFieldOrderKeys
-        : payload.columnPreset.fieldOrderKeys;
-    final visibleFields = sourceOrder
-        .where(
-          (fieldKey) =>
-              payload.columnPreset.visibleFieldKeys.contains(fieldKey) ||
-              fieldKey == ShotFieldKey.shotNo.storageKey,
-        )
-        .toList();
-    if (!visibleFields.contains(ShotFieldKey.shotNo.storageKey)) {
-      visibleFields.insert(0, ShotFieldKey.shotNo.storageKey);
-    }
+    final visibleFields = _visibleShotSheetFields(payload);
 
     final imageCache = <String, pw.MemoryImage>{};
+    final baseColumnWidths = {
+      for (final fieldKey in visibleFields)
+        fieldKey: _sheetColumnWidthValue(payload, fieldKey),
+    };
+    final baseRowHeights = {
+      for (final shot in payload.shots)
+        shot.id: _sheetRowHeightValue(payload, shot.id, visibleFields),
+    };
+    final resolvedMetrics = _resolveShotSheetMetrics(
+      payload: payload,
+      visibleFields: visibleFields,
+      columnWidths: baseColumnWidths,
+      rowHeights: baseRowHeights,
+    );
+    final columnWidths = resolvedMetrics.columnWidths;
+    final rowHeights = resolvedMetrics.rowHeights;
+    final layout = resolvedMetrics.layout;
+    final renderScale = layout.scale;
+    final headerScale = math.max(0.72, renderScale);
+    final renderColumnWidths = {
+      for (final entry in columnWidths.entries) entry.key: entry.value * renderScale,
+    };
+    final renderRowHeights = {
+      for (final entry in rowHeights.entries) entry.key: entry.value * renderScale,
+    };
     final tableRows = <pw.TableRow>[
       _tableHeaderRow(
         visibleFields
             .map((fieldKey) => _fieldLabel(payload, fieldKey))
             .toList(),
+        rowHeight: math.max(18, layout.headerRowHeight * renderScale),
+        fontSize: math.max(6.4, 8.6 * headerScale),
       ),
     ];
 
@@ -120,49 +136,42 @@ class PdfExportService {
           preset: payload.boardPreset,
           imageCache: imageCache,
           payload: payload,
+          rowHeight: renderRowHeights[shot.id]!,
+          textScale: renderScale,
         ),
       );
     }
 
-    final designWidth = visibleFields.fold<double>(
-      0,
-      (sum, fieldKey) => sum + _sheetColumnWidthValue(payload, fieldKey),
-    );
-    final columnWidths = <int, pw.TableColumnWidth>{
-      for (var index = 0; index < visibleFields.length; index++)
-        index: pw.FixedColumnWidth(
-          _sheetColumnWidthValue(payload, visibleFields[index]),
-        ),
-    };
-
     document.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4.landscape,
-        margin: const pw.EdgeInsets.fromLTRB(16, 16, 16, 16),
-        build: (context) => pw.FittedBox(
-          fit: pw.BoxFit.scaleDown,
-          alignment: pw.Alignment.topLeft,
-          child: pw.SizedBox(
-            width: designWidth,
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                _pdfHeader(
-                  title: _titleForType(payload.documentType),
-                  projectName: payload.bundle.name,
-                  payload: payload,
-                  brandingLogo: brandingLogo,
-                ),
-                pw.SizedBox(height: 8),
-                pw.Table(
-                  border: _shotSheetTableBorder(),
-                  defaultVerticalAlignment:
-                      pw.TableCellVerticalAlignment.middle,
-                  columnWidths: columnWidths,
-                  children: tableRows,
-                ),
-              ],
-            ),
+        margin: layout.margin,
+        build: (context) => pw.SizedBox(
+          width: layout.contentWidth * renderScale,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _pdfHeader(
+                title: _titleForType(payload.documentType),
+                projectName: payload.bundle.name,
+                payload: payload,
+                brandingLogo: brandingLogo,
+                scale: headerScale,
+              ),
+              pw.SizedBox(height: layout.headerSpacing * headerScale),
+              pw.Table(
+                border: _shotSheetTableBorder(),
+                defaultVerticalAlignment:
+                    pw.TableCellVerticalAlignment.middle,
+                columnWidths: {
+                  for (var index = 0; index < visibleFields.length; index++)
+                    index: pw.FixedColumnWidth(
+                      renderColumnWidths[visibleFields[index]]!,
+                    ),
+                },
+                children: tableRows,
+              ),
+            ],
           ),
         ),
       ),
@@ -236,7 +245,7 @@ class PdfExportService {
                           '画面内容',
                           '运镜 / 机位',
                           '时长',
-                        ]),
+                        ], rowHeight: 26),
                         for (final shotId in section.shotIds)
                           _tableDataRow(_planRowData(shotById[shotId])),
                       ],
@@ -417,7 +426,7 @@ class PdfExportService {
                           '画面内容',
                           '声音 / 台词',
                           '设备',
-                        ]),
+                        ], rowHeight: 26),
                         for (final shot in entry.shots)
                           _tableDataRow([
                             _displayShotNo(payload.boardPreset, shot),
@@ -459,11 +468,14 @@ class PdfExportService {
     if (sessionWidth != null && sessionWidth > 0) {
       return sessionWidth;
     }
+    if (_isImageField(payload, fieldKey)) {
+      return fieldKey == ShotFieldKey.frameImage.storageKey ? 260 : 220;
+    }
     return switch (fieldKey) {
       'shotNo' => 58,
       'durationSec' => 60,
       'shotSize' => 64,
-      'frameImage' || 'referenceImage' => 140,
+      'frameImage' || 'referenceImage' => 220,
       'content' => 260,
       'dialogue' => 180,
       'notes' => 180,
@@ -477,23 +489,39 @@ class PdfExportService {
     }.toDouble();
   }
 
+  double _sheetRowHeightValue(
+    ExportPayload payload,
+    String shotId,
+    List<String> visibleFields,
+  ) {
+    final sessionHeight = payload.effectiveRowHeights[shotId];
+    if (sessionHeight != null && sessionHeight > 0) {
+      return sessionHeight;
+    }
+    return visibleFields.any((fieldKey) => _isImageField(payload, fieldKey))
+        ? 108
+        : 76;
+  }
+
   Future<pw.TableRow> _shotSheetRow({
     required ShotRecord shot,
     required List<String> fields,
     required BoardPreset preset,
     required Map<String, pw.MemoryImage> imageCache,
     required ExportPayload payload,
+    required double rowHeight,
+    required double textScale,
   }) async {
     final cells = <pw.Widget>[];
+    final effectiveTextScale = math.max(0.76, textScale);
 
     for (final fieldKey in fields) {
-      if (fieldKey == 'frameImage' || fieldKey == 'referenceImage') {
-        final asset = fieldKey == 'frameImage'
-            ? shot.frameImage
-            : shot.referenceImage;
+      if (_isImageField(payload, fieldKey)) {
+        final asset = _assetForField(shot, fieldKey);
         final image = await _loadMemoryImage(asset, imageCache);
         cells.add(
-          pw.Padding(
+          pw.Container(
+            height: rowHeight,
             padding: const pw.EdgeInsets.all(4),
             child: _pdfImageBox(
               image: image,
@@ -506,12 +534,14 @@ class PdfExportService {
       }
 
       cells.add(
-        pw.Padding(
+        pw.Container(
+          height: rowHeight,
+          alignment: pw.Alignment.centerLeft,
           padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
           child: pw.Text(
             _fieldValue(shot, fieldKey, preset),
-            style: const pw.TextStyle(fontSize: 8.2),
-            maxLines: 4,
+            style: pw.TextStyle(fontSize: math.max(6.0, 8.2 * effectiveTextScale)),
+            maxLines: rowHeight >= 52 ? 4 : 3,
             overflow: pw.TextOverflow.clip,
           ),
         ),
@@ -526,14 +556,22 @@ class PdfExportService {
     required String projectName,
     required ExportPayload payload,
     required pw.MemoryImage? brandingLogo,
+    double scale = 1.0,
   }) {
     final brandName = payload.branding.brandName.trim();
     final tagline = payload.branding.tagline.trim();
     final hasBrandBlock =
         brandingLogo != null || brandName.isNotEmpty || tagline.isNotEmpty;
+    final paddingBottom = 10 * scale;
+    final titleSize = math.max(12.0, 18 * scale);
+    final projectSize = math.max(8.6, 11 * scale);
+    final brandSize = math.max(8.4, 11 * scale);
+    final taglineSize = math.max(7.0, 8.5 * scale);
+    final logoSize = math.max(20.0, 28 * scale);
+    final gap = math.max(8.0, 16 * scale);
 
     return pw.Container(
-      padding: const pw.EdgeInsets.only(bottom: 10),
+      padding: pw.EdgeInsets.only(bottom: paddingBottom),
       decoration: const pw.BoxDecoration(
         border: pw.Border(
           bottom: pw.BorderSide(color: PdfColors.grey700, width: 0.9),
@@ -549,17 +587,20 @@ class PdfExportService {
                 pw.Text(
                   title,
                   style: pw.TextStyle(
-                    fontSize: 18,
+                    fontSize: titleSize,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
                 pw.SizedBox(height: 4),
-                pw.Text(projectName, style: const pw.TextStyle(fontSize: 11)),
+                pw.Text(
+                  projectName,
+                  style: pw.TextStyle(fontSize: projectSize),
+                ),
               ],
             ),
           ),
           if (hasBrandBlock) ...[
-            pw.SizedBox(width: 16),
+            pw.SizedBox(width: gap),
             pw.Row(
               mainAxisSize: pw.MainAxisSize.min,
               children: [
@@ -569,8 +610,8 @@ class PdfExportService {
                     verticalRadius: 7,
                     child: pw.Image(
                       brandingLogo,
-                      width: 28,
-                      height: 28,
+                      width: logoSize,
+                      height: logoSize,
                       fit: pw.BoxFit.cover,
                     ),
                   ),
@@ -583,7 +624,7 @@ class PdfExportService {
                       pw.Text(
                         brandName,
                         style: pw.TextStyle(
-                          fontSize: 11,
+                          fontSize: brandSize,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),
@@ -592,7 +633,7 @@ class PdfExportService {
                     if (tagline.isNotEmpty)
                       pw.Text(
                         tagline,
-                        style: const pw.TextStyle(fontSize: 8.5),
+                        style: pw.TextStyle(fontSize: taglineSize),
                         textAlign: pw.TextAlign.right,
                       ),
                   ],
@@ -605,12 +646,18 @@ class PdfExportService {
     );
   }
 
-  pw.TableRow _tableHeaderRow(List<String> values) {
+  pw.TableRow _tableHeaderRow(
+    List<String> values, {
+    required double rowHeight,
+    double fontSize = 8.6,
+  }) {
     return pw.TableRow(
       decoration: const pw.BoxDecoration(color: PdfColors.grey300),
       children: values
           .map(
-            (value) => pw.Padding(
+            (value) => pw.Container(
+              height: rowHeight,
+              alignment: pw.Alignment.centerLeft,
               padding: const pw.EdgeInsets.symmetric(
                 horizontal: 5,
                 vertical: 5,
@@ -618,7 +665,7 @@ class PdfExportService {
               child: pw.Text(
                 value,
                 style: pw.TextStyle(
-                  fontSize: 8.6,
+                  fontSize: fontSize,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -730,6 +777,9 @@ class PdfExportService {
 
   String _fieldValue(ShotRecord shot, String fieldKey, BoardPreset preset) {
     final customValue = shot.customFieldValues[fieldKey];
+    if (customValue is AssetRef) {
+      return customValue.uri;
+    }
     if (customValue != null) {
       return '$customValue'.trim();
     }
@@ -786,4 +836,232 @@ class PdfExportService {
       verticalInside: pw.BorderSide(color: PdfColors.grey800, width: 0.95),
     );
   }
+
+  List<String> _visibleShotSheetFields(ExportPayload payload) {
+    final sourceOrder = payload.effectiveFieldOrderKeys.isNotEmpty
+        ? payload.effectiveFieldOrderKeys
+        : payload.columnPreset.fieldOrderKeys;
+    final visibleFields = sourceOrder
+        .where(
+          (fieldKey) =>
+              payload.columnPreset.visibleFieldKeys.contains(fieldKey) ||
+              fieldKey == ShotFieldKey.shotNo.storageKey,
+        )
+        .toList();
+    if (!visibleFields.contains(ShotFieldKey.shotNo.storageKey)) {
+      visibleFields.insert(0, ShotFieldKey.shotNo.storageKey);
+    }
+    return visibleFields;
+  }
+
+  bool _isImageField(ExportPayload payload, String fieldKey) {
+    if (fieldKey == ShotFieldKey.frameImage.storageKey ||
+        fieldKey == ShotFieldKey.referenceImage.storageKey) {
+      return true;
+    }
+    return payload.shots.any((shot) => shot.customFieldValues[fieldKey] is AssetRef);
+  }
+
+  AssetRef? _assetForField(ShotRecord shot, String fieldKey) {
+    if (fieldKey == ShotFieldKey.frameImage.storageKey) {
+      return shot.frameImage;
+    }
+    if (fieldKey == ShotFieldKey.referenceImage.storageKey) {
+      return shot.referenceImage;
+    }
+    final value = shot.customFieldValues[fieldKey];
+    return value is AssetRef ? value : null;
+  }
+
+  _ShotSheetLayout _computeShotSheetLayout({
+    required ExportPayload payload,
+    required List<String> visibleFields,
+    required Map<String, double> columnWidths,
+    required Map<String, double> rowHeights,
+  }) {
+    const margin = pw.EdgeInsets.fromLTRB(16, 16, 16, 16);
+    const headerHeight = 46.0;
+    const headerSpacing = 8.0;
+    const headerRowHeight = 26.0;
+    final contentWidth = visibleFields.fold<double>(
+      0,
+      (sum, fieldKey) => sum + columnWidths[fieldKey]!,
+    );
+    final rowsHeight = payload.shots.fold<double>(
+      0,
+      (sum, shot) => sum + rowHeights[shot.id]!,
+    );
+    final contentHeight =
+        headerHeight + headerSpacing + headerRowHeight + rowsHeight;
+    final availableWidth =
+        PdfPageFormat.a4.landscape.availableWidth - margin.left - margin.right;
+    final availableHeight =
+        PdfPageFormat.a4.landscape.availableHeight - margin.top - margin.bottom;
+    final scale = math.min(
+      1.0,
+      math.min(
+        availableWidth / math.max(contentWidth, 1),
+        availableHeight / math.max(contentHeight, 1),
+      ),
+    );
+    return _ShotSheetLayout(
+      margin: margin,
+      headerSpacing: headerSpacing,
+      headerRowHeight: headerRowHeight,
+      contentWidth: contentWidth,
+      scale: scale.isFinite && scale > 0 ? scale : 1.0,
+    );
+  }
+
+  _ResolvedShotSheetMetrics _resolveShotSheetMetrics({
+    required ExportPayload payload,
+    required List<String> visibleFields,
+    required Map<String, double> columnWidths,
+    required Map<String, double> rowHeights,
+  }) {
+    var activeColumnWidths = Map<String, double>.from(columnWidths);
+    var activeRowHeights = Map<String, double>.from(rowHeights);
+    var layout = _computeShotSheetLayout(
+      payload: payload,
+      visibleFields: visibleFields,
+      columnWidths: activeColumnWidths,
+      rowHeights: activeRowHeights,
+    );
+
+    if (layout.scale >= 0.78) {
+      return _ResolvedShotSheetMetrics(
+        columnWidths: activeColumnWidths,
+        rowHeights: activeRowHeights,
+        layout: layout,
+      );
+    }
+
+    for (final level in const [1, 2]) {
+      activeColumnWidths = _compactShotSheetColumnWidths(
+        payload,
+        activeColumnWidths,
+        level: level,
+      );
+      activeRowHeights = _compactShotSheetRowHeights(
+        payload,
+        visibleFields,
+        activeRowHeights,
+        level: level,
+      );
+      layout = _computeShotSheetLayout(
+        payload: payload,
+        visibleFields: visibleFields,
+        columnWidths: activeColumnWidths,
+        rowHeights: activeRowHeights,
+      );
+      if (layout.scale >= 0.62) {
+        break;
+      }
+    }
+
+    return _ResolvedShotSheetMetrics(
+      columnWidths: activeColumnWidths,
+      rowHeights: activeRowHeights,
+      layout: layout,
+    );
+  }
+
+  Map<String, double> _compactShotSheetColumnWidths(
+    ExportPayload payload,
+    Map<String, double> widths, {
+    required int level,
+  }) {
+    final factor = level == 1 ? 0.86 : 0.74;
+    return {
+      for (final entry in widths.entries)
+        entry.key: _sheetColumnWidthBounds(
+          payload,
+          entry.key,
+          entry.value * factor,
+          level: level,
+        ),
+    };
+  }
+
+  Map<String, double> _compactShotSheetRowHeights(
+    ExportPayload payload,
+    List<String> visibleFields,
+    Map<String, double> heights, {
+    required int level,
+  }) {
+    final hasImage = visibleFields.any((fieldKey) => _isImageField(payload, fieldKey));
+    final factor = hasImage
+        ? (level == 1 ? 0.76 : 0.62)
+        : (level == 1 ? 0.82 : 0.7);
+    final minHeight = hasImage
+        ? (level == 1 ? 68.0 : 54.0)
+        : (level == 1 ? 46.0 : 36.0);
+    final maxHeight = hasImage ? 92.0 : 60.0;
+    return {
+      for (final entry in heights.entries)
+        entry.key: _clampDouble(entry.value * factor, minHeight, maxHeight),
+    };
+  }
+
+  double _sheetColumnWidthBounds(
+    ExportPayload payload,
+    String fieldKey,
+    double value, {
+    required int level,
+  }) {
+    final (minWidth, maxWidth) = switch (fieldKey) {
+      'shotNo' => (44.0, level == 1 ? 58.0 : 52.0),
+      'durationSec' => (44.0, level == 1 ? 60.0 : 54.0),
+      'shotSize' => (52.0, level == 1 ? 70.0 : 62.0),
+      'cameraAngle' || 'cameraMove' => (76.0, level == 1 ? 92.0 : 82.0),
+      'cameraRig' => (82.0, level == 1 ? 100.0 : 88.0),
+      'focalLength' => (70.0, level == 1 ? 84.0 : 78.0),
+      'content' => (150.0, level == 1 ? 220.0 : 180.0),
+      'dialogue' || 'notes' || 'sceneExpectation' => (
+        126.0,
+        level == 1 ? 176.0 : 150.0,
+      ),
+      'audio' => (110.0, level == 1 ? 156.0 : 136.0),
+      'frameImage' => (110.0, level == 1 ? 180.0 : 148.0),
+      'referenceImage' => (102.0, level == 1 ? 156.0 : 132.0),
+      _ when _isImageField(payload, fieldKey) => (
+        102.0,
+        level == 1 ? 156.0 : 132.0,
+      ),
+      _ => (96.0, level == 1 ? 148.0 : 128.0),
+    };
+    return _clampDouble(value, minWidth, maxWidth);
+  }
+}
+
+class _ShotSheetLayout {
+  const _ShotSheetLayout({
+    required this.margin,
+    required this.headerSpacing,
+    required this.headerRowHeight,
+    required this.contentWidth,
+    required this.scale,
+  });
+
+  final pw.EdgeInsets margin;
+  final double headerSpacing;
+  final double headerRowHeight;
+  final double contentWidth;
+  final double scale;
+}
+
+class _ResolvedShotSheetMetrics {
+  const _ResolvedShotSheetMetrics({
+    required this.columnWidths,
+    required this.rowHeights,
+    required this.layout,
+  });
+
+  final Map<String, double> columnWidths;
+  final Map<String, double> rowHeights;
+  final _ShotSheetLayout layout;
+}
+
+double _clampDouble(double value, double min, double max) {
+  return math.min(math.max(value, min), max);
 }

@@ -34,6 +34,7 @@ class ProjectWorkspaceCommandService {
 
   void _registerHandlers() {
     commandBus.register<CreateShotCommand>(_handleCreateShot);
+    commandBus.register<DeleteShotCommand>(_handleDeleteShot);
     commandBus.register<UpdateShotFieldCommand>(_handleUpdateShotField);
     commandBus.register<BatchUpdateShotFieldCommand>(_handleBatchUpdateField);
     commandBus.register<ReorderShotCommand>(_handleReorderShot);
@@ -64,6 +65,7 @@ class ProjectWorkspaceCommandService {
   Future<ShotRecord> createShot(
     String projectId, {
     ShotRecord? seedShot,
+    int? insertIndex,
   }) async {
     final effectiveSeedShot = seedShot == null
         ? null
@@ -71,9 +73,22 @@ class ProjectWorkspaceCommandService {
         ? seedShot.copyWith(id: _uuid.v4())
         : seedShot;
     final result = await commandBus.dispatch(
-      CreateShotCommand(projectId: projectId, seedShot: effectiveSeedShot),
+      CreateShotCommand(
+        projectId: projectId,
+        seedShot: effectiveSeedShot,
+        insertIndex: insertIndex,
+      ),
     );
     return result.payload! as ShotRecord;
+  }
+
+  Future<void> deleteShot({
+    required String projectId,
+    required String shotId,
+  }) async {
+    await commandBus.dispatch(
+      DeleteShotCommand(projectId: projectId, shotId: shotId),
+    );
   }
 
   Future<List<ShotRecord>> importSeedShotsBatch(
@@ -85,21 +100,41 @@ class ProjectWorkspaceCommandService {
     }
 
     final existingShots = await workspaceRepository.loadShots(projectId);
-    final createdShots = <ShotRecord>[];
     final effectiveSeeds = <ShotRecord>[];
+    final reusableScaffolds = _detectReusableScaffoldShots(existingShots);
+    final reusedShotIds = <String>[];
+    final deletedScaffolds = <ShotRecord>[];
+    final createdShots = <ShotRecord>[];
+    final originalPlanBoard = await workspaceRepository.loadPlanBoard(projectId);
 
     try {
       for (var index = 0; index < seedShots.length; index++) {
         final seed = seedShots[index];
+        if (index < reusableScaffolds.length) {
+          final target = reusableScaffolds[index];
+          reusedShotIds.add(target.id);
+          await _overwriteShotFromSeed(
+            projectId: projectId,
+            shotId: target.id,
+            seed: seed,
+          );
+          continue;
+        }
+
         final effectiveSeed =
             (seed.id.trim().isEmpty ? seed.copyWith(id: _uuid.v4()) : seed)
-                .copyWith(orderIndex: existingShots.length + index);
+                .copyWith(orderIndex: existingShots.length + createdShots.length);
         effectiveSeeds.add(effectiveSeed);
         final created = await workspaceRepository.createShot(
           projectId,
           seedShot: effectiveSeed,
         );
         createdShots.add(created);
+      }
+
+      for (final scaffold in reusableScaffolds.skip(seedShots.length)) {
+        deletedScaffolds.add(scaffold);
+        await workspaceRepository.deleteShot(projectId, scaffold.id);
       }
     } catch (_) {
       for (final shot in createdShots.reversed) {
@@ -112,20 +147,28 @@ class ProjectWorkspaceCommandService {
       HistoryEntry(
         label: 'ImportAiStoryboardDrafts',
         createdAt: DateTime.now(),
-        undo: () async {
-          for (final shot in createdShots.reversed) {
-            await workspaceRepository.deleteShot(projectId, shot.id);
-          }
-        },
-        redo: () async {
-          for (final seed in effectiveSeeds) {
-            await workspaceRepository.createShot(projectId, seedShot: seed);
-          }
-        },
+        undo: () => _undoImportedSeedShotsBatch(
+          projectId: projectId,
+          originalShots: existingShots,
+          originalPlanBoard: originalPlanBoard,
+          createdShots: createdShots,
+          reusedShotIds: reusedShotIds,
+          deletedScaffolds: deletedScaffolds,
+        ),
+        redo: () => _redoImportedSeedShotsBatch(
+          projectId: projectId,
+          originalShots: existingShots,
+          originalPlanBoard: originalPlanBoard,
+          effectiveSeeds: effectiveSeeds,
+          reusableScaffolds: reusableScaffolds,
+          reusedShotIds: reusedShotIds,
+          deletedScaffolds: deletedScaffolds,
+          sourceSeeds: seedShots,
+        ),
       ),
     );
 
-    return createdShots;
+    return workspaceRepository.loadShots(projectId);
   }
 
   Future<void> updateField({
@@ -412,6 +455,7 @@ class ProjectWorkspaceCommandService {
     final created = await workspaceRepository.createShot(
       command.projectId,
       seedShot: command.seedShot,
+      insertIndex: command.insertIndex,
     );
     final seed = created.copyWith();
     return CommandResult(
@@ -427,6 +471,49 @@ class ProjectWorkspaceCommandService {
             seedShot: seed,
           );
         },
+      ),
+    );
+  }
+
+  Future<CommandResult> _handleDeleteShot(DeleteShotCommand command) async {
+    final shots = await workspaceRepository.loadShots(command.projectId);
+    final shot = shots.firstWhere((item) => item.id == command.shotId);
+    final board = await workspaceRepository.loadPlanBoard(command.projectId);
+    final previousSectionId = _findShotSectionId(board, command.shotId);
+    final previousSectionOrder = previousSectionId == null
+        ? null
+        : board.sections
+              .firstWhere((item) => item.id == previousSectionId)
+              .shotIds;
+
+    await workspaceRepository.deleteShot(command.projectId, command.shotId);
+
+    return CommandResult(
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () async {
+          await workspaceRepository.createShot(
+            command.projectId,
+            seedShot: shot,
+          );
+          if (previousSectionId != null) {
+            await workspaceRepository.assignShotToSection(
+              command.projectId,
+              shot.id,
+              previousSectionId,
+            );
+            if (previousSectionOrder != null) {
+              await workspaceRepository.reorderSectionShots(
+                command.projectId,
+                previousSectionId,
+                previousSectionOrder,
+              );
+            }
+          }
+        },
+        redo: () =>
+            workspaceRepository.deleteShot(command.projectId, command.shotId),
       ),
     );
   }
@@ -1293,6 +1380,217 @@ class ProjectWorkspaceCommandService {
             workspaceRepository.unassignShot(command.projectId, command.shotId),
       ),
     );
+  }
+
+  List<ShotRecord> _detectReusableScaffoldShots(List<ShotRecord> shots) {
+    final reusable = <ShotRecord>[];
+    for (final shot in shots) {
+      if (!_isScaffoldShot(shot)) {
+        break;
+      }
+      reusable.add(shot);
+    }
+    return reusable;
+  }
+
+  bool _isScaffoldShot(ShotRecord shot) {
+    final hasCustomData = shot.customFieldValues.values.any((value) {
+      if (value == null) {
+        return false;
+      }
+      if (value is AssetRef) {
+        return true;
+      }
+      return value.toString().trim().isNotEmpty;
+    });
+    return shot.frameImage == null &&
+        shot.referenceImage == null &&
+        !hasCustomData &&
+        shot.durationSec == 0 &&
+        shot.content.trim().isEmpty &&
+        shot.dialogue.trim().isEmpty &&
+        shot.notes.trim().isEmpty &&
+        shot.sceneExpectation.trim().isEmpty &&
+        shot.audio.trim().isEmpty &&
+        shot.shotSize.trim() == '中景' &&
+        shot.cameraAngle.trim() == '平视' &&
+        shot.cameraMove.trim() == '固定' &&
+        shot.cameraRig.trim() == '手持' &&
+        shot.focalLength.trim() == '35mm' &&
+        int.tryParse(shot.shotNo.trim()) != null;
+  }
+
+  Future<void> _overwriteShotFromSeed({
+    required String projectId,
+    required String shotId,
+    required ShotRecord seed,
+  }) async {
+    final updates = <String, Object?>{
+      'shotNo': seed.shotNo,
+      'shotSize': seed.shotSize,
+      'durationSec': seed.durationSec,
+      'content': seed.content,
+      'dialogue': seed.dialogue,
+      'notes': seed.notes,
+      'sceneExpectation': seed.sceneExpectation,
+      'audio': seed.audio,
+      'cameraAngle': seed.cameraAngle,
+      'cameraMove': seed.cameraMove,
+      'cameraRig': seed.cameraRig,
+      'focalLength': seed.focalLength,
+    };
+    for (final entry in updates.entries) {
+      await workspaceRepository.updateShotField(
+        projectId,
+        shotId,
+        entry.key,
+        entry.value,
+      );
+    }
+  }
+
+  Future<void> _restoreShotSnapshot({
+    required String projectId,
+    required ShotRecord shot,
+  }) async {
+    final updates = <String, Object?>{
+      'shotNo': shot.shotNo,
+      'shotSize': shot.shotSize,
+      'durationSec': shot.durationSec,
+      'content': shot.content,
+      'dialogue': shot.dialogue,
+      'notes': shot.notes,
+      'sceneExpectation': shot.sceneExpectation,
+      'audio': shot.audio,
+      'cameraAngle': shot.cameraAngle,
+      'cameraMove': shot.cameraMove,
+      'cameraRig': shot.cameraRig,
+      'focalLength': shot.focalLength,
+      'frameImage': shot.frameImage == null
+          ? null
+          : AssetRefPayload.fromAssetRef(shot.frameImage!),
+      'referenceImage': shot.referenceImage == null
+          ? null
+          : AssetRefPayload.fromAssetRef(shot.referenceImage!),
+      ...{
+        for (final entry in shot.customFieldValues.entries)
+          entry.key: entry.value is AssetRef
+              ? AssetRefPayload.fromAssetRef(entry.value as AssetRef)
+              : entry.value,
+      },
+    };
+    for (final entry in updates.entries) {
+      await workspaceRepository.updateShotField(
+        projectId,
+        shot.id,
+        entry.key,
+        entry.value,
+      );
+    }
+  }
+
+  Future<void> _restorePlanAssignments({
+    required String projectId,
+    required PlanBoard board,
+    required Set<String> shotIds,
+  }) async {
+    for (final section in board.sections) {
+      final sectionShotIds = section.shotIds
+          .where((shotId) => shotIds.contains(shotId))
+          .toList();
+      if (sectionShotIds.isEmpty) {
+        continue;
+      }
+      for (final shotId in sectionShotIds) {
+        await workspaceRepository.assignShotToSection(
+          projectId,
+          shotId,
+          section.id,
+        );
+      }
+      await workspaceRepository.reorderSectionShots(
+        projectId,
+        section.id,
+        section.shotIds,
+      );
+    }
+  }
+
+  Future<void> _undoImportedSeedShotsBatch({
+    required String projectId,
+    required List<ShotRecord> originalShots,
+    required PlanBoard originalPlanBoard,
+    required List<ShotRecord> createdShots,
+    required List<String> reusedShotIds,
+    required List<ShotRecord> deletedScaffolds,
+  }) async {
+    for (final shot in createdShots.reversed) {
+      await workspaceRepository.deleteShot(projectId, shot.id);
+    }
+    for (final shot in deletedScaffolds) {
+      await workspaceRepository.createShot(projectId, seedShot: shot);
+    }
+    final originalById = {for (final shot in originalShots) shot.id: shot};
+    for (final shotId in reusedShotIds) {
+      final snapshot = originalById[shotId];
+      if (snapshot != null) {
+        await _restoreShotSnapshot(projectId: projectId, shot: snapshot);
+      }
+    }
+    await workspaceRepository.reorderShots(
+      projectId,
+      originalShots.map((shot) => shot.id).toList(),
+    );
+    await _restorePlanAssignments(
+      projectId: projectId,
+      board: originalPlanBoard,
+      shotIds: {
+        ...reusedShotIds,
+        ...deletedScaffolds.map((shot) => shot.id),
+      },
+    );
+  }
+
+  Future<void> _redoImportedSeedShotsBatch({
+    required String projectId,
+    required List<ShotRecord> originalShots,
+    required PlanBoard originalPlanBoard,
+    required List<ShotRecord> effectiveSeeds,
+    required List<ShotRecord> reusableScaffolds,
+    required List<String> reusedShotIds,
+    required List<ShotRecord> deletedScaffolds,
+    required List<ShotRecord> sourceSeeds,
+  }) async {
+    for (var index = 0; index < sourceSeeds.length; index++) {
+      final seed = sourceSeeds[index];
+      if (index < reusableScaffolds.length) {
+        await _overwriteShotFromSeed(
+          projectId: projectId,
+          shotId: reusableScaffolds[index].id,
+          seed: seed,
+        );
+        continue;
+      }
+      final effectiveSeed = effectiveSeeds[index - reusableScaffolds.length];
+      await workspaceRepository.createShot(projectId, seedShot: effectiveSeed);
+    }
+    for (final scaffold in reusableScaffolds.skip(sourceSeeds.length)) {
+      await workspaceRepository.deleteShot(projectId, scaffold.id);
+    }
+    await _restorePlanAssignments(
+      projectId: projectId,
+      board: originalPlanBoard,
+      shotIds: reusedShotIds.toSet(),
+    );
+    final createdIds = effectiveSeeds.map((shot) => shot.id).toSet();
+    final finalIds = <String>[
+      for (final shot in originalShots)
+        if (!deletedScaffolds.any((item) => item.id == shot.id) ||
+            reusedShotIds.contains(shot.id))
+          shot.id,
+      ...createdIds,
+    ];
+    await workspaceRepository.reorderShots(projectId, finalIds);
   }
 
   Object? _readShotFieldValue(ShotRecord shot, String fieldKey) {

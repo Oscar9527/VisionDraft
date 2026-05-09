@@ -472,13 +472,15 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   Future<ShotRecord> createShot(
     String projectId, {
     ShotRecord? seedShot,
+    int? insertIndex,
   }) async {
     return _withDb(projectId, (database, bundle) async {
       final shotCount = await _countShots(database, projectId);
-      final orderIndex = seedShot?.orderIndex ?? shotCount;
+      final orderIndex =
+          insertIndex?.clamp(0, shotCount) ?? seedShot?.orderIndex ?? shotCount;
       final shotId = seedShot?.id ?? _uuid.v4();
 
-      if (seedShot != null) {
+      if (orderIndex < shotCount) {
         await _shiftShotOrders(
           database,
           projectId,
@@ -545,6 +547,56 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
           fieldKey: ShotFieldKey.referenceImage.storageKey,
           asset: row.referenceImage!,
         );
+      }
+      if (row.customFieldValues.isNotEmpty) {
+        final customColumns = await _loadSanitizedCustomColumnsWithDb(
+          database,
+          projectId,
+        );
+        for (final column in customColumns) {
+          final value = row.customFieldValues[column.fieldKey];
+          if (value == null) {
+            continue;
+          }
+          if (column.type == CustomColumnType.image) {
+            final asset = switch (value) {
+              AssetRefPayload data => data.toAssetRef(),
+              AssetRef data => data,
+              _ => null,
+            };
+            if (asset != null) {
+              await _upsertAsset(
+                database,
+                bundle,
+                shotId: row.id,
+                fieldKey: column.fieldKey,
+                asset: asset,
+              );
+            }
+            continue;
+          }
+          await database.into(database.shotCustomValues).insertOnConflictUpdate(
+            switch (column.type) {
+              CustomColumnType.text => db.ShotCustomValuesCompanion.insert(
+                shotId: row.id,
+                columnId: column.id,
+                textValue: Value(value.toString()),
+              ),
+              CustomColumnType.number => db.ShotCustomValuesCompanion.insert(
+                shotId: row.id,
+                columnId: column.id,
+                numberValue: Value((value as num).toDouble()),
+              ),
+              CustomColumnType.singleSelect =>
+                db.ShotCustomValuesCompanion.insert(
+                  shotId: row.id,
+                  columnId: column.id,
+                  enumValue: Value(value.toString()),
+                ),
+              CustomColumnType.image => throw StateError('unreachable'),
+            },
+          );
+        }
       }
 
       await _touchProject(database, projectId);
@@ -781,6 +833,33 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         projectId,
       );
       final column = customColumns.firstWhere((item) => item.id == columnId);
+      final customFieldKey = 'custom:$columnId';
+      if (column.type == CustomColumnType.image) {
+        await (database.delete(database.shotAssets)..where(
+              (tbl) =>
+                  tbl.shotId.equals(shotId) &
+                  tbl.fieldKey.equals(customFieldKey),
+            ))
+            .go();
+        final asset = switch (value) {
+          AssetRefPayload data => data.toAssetRef(),
+          AssetRef data => data,
+          _ => throw ArgumentError.value(
+              value,
+              'value',
+              'Unsupported asset payload for custom image field $customFieldKey',
+            ),
+        };
+        await _upsertAsset(
+          database,
+          bundle,
+          shotId: shotId,
+          fieldKey: customFieldKey,
+          asset: asset,
+        );
+        await _touchProject(database, projectId);
+        return;
+      }
       if (column.type == CustomColumnType.singleSelect && value is String) {
         final nextValue = value.trim();
         if (nextValue.isNotEmpty && !column.options.contains(nextValue)) {
@@ -810,6 +889,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
           shotId: shotId,
           columnId: columnId,
           enumValue: Value(value.toString()),
+        ),
+        CustomColumnType.image => throw StateError(
+          'Image custom fields are stored in shot_assets.',
         ),
       };
       await database.into(database.shotCustomValues).insert(row);
@@ -1061,6 +1143,9 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         await (database.delete(
           database.shotCustomValues,
         )..where((tbl) => tbl.columnId.equals(columnId))).go();
+        await (database.delete(
+          database.shotAssets,
+        )..where((tbl) => tbl.fieldKey.equals('custom:$columnId'))).go();
         await (database.delete(
           database.customColumns,
         )..where((tbl) => tbl.id.equals(columnId))).go();
@@ -1558,6 +1643,13 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
 
     final customFieldValues = <String, Object?>{};
     for (final column in customColumns) {
+      if (column.type == CustomColumnType.image) {
+        final asset = resolveAsset(column.fieldKey);
+        if (asset != null) {
+          customFieldValues[column.fieldKey] = asset;
+        }
+        continue;
+      }
       final value = customValues[column.id];
       if (value == null) {
         continue;
@@ -1778,6 +1870,20 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
       final columnId = row.read<String>('column_id');
       final count = row.read<int>('value_count');
       valueCounts[columnId] = count;
+    }
+    final assetCountRows = await database.customSelect('''
+      SELECT field_key, COUNT(*) AS value_count
+      FROM shot_assets
+      WHERE field_key LIKE 'custom:%'
+      GROUP BY field_key
+      ''').get();
+    for (final row in assetCountRows) {
+      final fieldKey = row.read<String>('field_key');
+      final columnId = fieldKey.startsWith('custom:')
+          ? fieldKey.substring('custom:'.length)
+          : fieldKey;
+      final count = row.read<int>('value_count');
+      valueCounts[columnId] = (valueCounts[columnId] ?? 0) + count;
     }
 
     final sanitized = <CustomColumnDefinition>[];

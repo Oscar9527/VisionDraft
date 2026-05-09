@@ -81,13 +81,31 @@ class BatchFieldUpdate {
 }
 
 class CreateShotCommand extends AppCommand {
-  const CreateShotCommand({required this.projectId, this.seedShot});
+  const CreateShotCommand({
+    required this.projectId,
+    this.seedShot,
+    this.insertIndex,
+  });
 
   final String projectId;
   final ShotRecord? seedShot;
+  final int? insertIndex;
 
   @override
   String get label => 'CreateShot';
+}
+
+class DeleteShotCommand extends AppCommand {
+  const DeleteShotCommand({
+    required this.projectId,
+    required this.shotId,
+  });
+
+  final String projectId;
+  final String shotId;
+
+  @override
+  String get label => 'DeleteShot';
 }
 
 class UpdateShotFieldCommand extends AppCommand {

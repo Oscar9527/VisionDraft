@@ -1,6 +1,6 @@
 import 'shot_fields.dart';
 
-enum CustomColumnType { text, number, singleSelect }
+enum CustomColumnType { text, number, singleSelect, image }
 
 enum BuiltInEnumSource {
   shotSize,

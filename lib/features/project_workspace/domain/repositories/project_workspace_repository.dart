@@ -36,7 +36,11 @@ abstract interface class ProjectWorkspaceRepository {
 
   Future<void> compactProject(String projectId);
 
-  Future<ShotRecord> createShot(String projectId, {ShotRecord? seedShot});
+  Future<ShotRecord> createShot(
+    String projectId, {
+    ShotRecord? seedShot,
+    int? insertIndex,
+  });
 
   Future<void> deleteShot(String projectId, String shotId);
 
