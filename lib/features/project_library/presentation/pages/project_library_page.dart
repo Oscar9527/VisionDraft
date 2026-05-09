@@ -95,12 +95,6 @@ class ProjectLibraryPage extends ConsumerWidget {
                 onOpenExistingProject: openExistingProject,
               ),
               const SizedBox(height: 10),
-              _LibraryStats(
-                totalCount: state.projects.length,
-                visibleCount: state.filteredProjects.length,
-                hasQuery: state.query.isNotEmpty,
-              ),
-              const SizedBox(height: 10),
               Expanded(
                 child: _ProjectLibraryContent(
                   isLoading: state.isLoading,
@@ -283,34 +277,6 @@ class _LibraryHeader extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-class _LibraryStats extends StatelessWidget {
-  const _LibraryStats({
-    required this.totalCount,
-    required this.visibleCount,
-    required this.hasQuery,
-  });
-
-  final int totalCount;
-  final int visibleCount;
-  final bool hasQuery;
-
-  @override
-  Widget build(BuildContext context) {
-    return SurfaceCard(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          _StatChip(label: '项目数', value: '$totalCount'),
-          _StatChip(label: hasQuery ? '筛选结果' : '当前视图', value: '$visibleCount'),
-          const _StatChip(label: '存储形态', value: '.vdraft 项目目录'),
-        ],
-      ),
     );
   }
 }
