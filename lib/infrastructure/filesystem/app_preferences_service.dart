@@ -40,6 +40,30 @@ class AppPreferencesService {
     final file = await _resolveSettingsFile();
     final payload = await _readExistingSettings(file);
     payload[_themeModeKey] = _encodeThemeMode(themeMode);
+    await _writeSettings(file, payload);
+  }
+
+  Future<Map<String, dynamic>?> loadJsonObject(String key) async {
+    final file = await _resolveSettingsFile();
+    final payload = await _readExistingSettings(file);
+    final value = payload[key];
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return null;
+  }
+
+  Future<void> saveJsonObject(String key, Map<String, dynamic> value) async {
+    final file = await _resolveSettingsFile();
+    final payload = await _readExistingSettings(file);
+    payload[key] = value;
+    await _writeSettings(file, payload);
+  }
+
+  Future<void> _writeSettings(File file, Map<String, dynamic> payload) async {
     await file.writeAsString(
       const JsonEncoder.withIndent('  ').convert(payload),
       flush: true,

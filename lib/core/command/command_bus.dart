@@ -2,15 +2,15 @@ import '../history/history_entry.dart';
 import '../history/history_manager.dart';
 import 'app_command.dart';
 
-typedef CommandHandler<T extends AppCommand> = Future<CommandResult> Function(
-  T command,
-);
+typedef CommandHandler<T extends AppCommand> =
+    Future<CommandResult> Function(T command);
 
 class CommandResult {
-  const CommandResult({this.historyEntry, this.message});
+  const CommandResult({this.historyEntry, this.message, this.payload});
 
   final HistoryEntry? historyEntry;
   final String? message;
+  final Object? payload;
 }
 
 class CommandBus {

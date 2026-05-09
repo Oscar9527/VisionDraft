@@ -4,6 +4,7 @@ import '../models/board_preset.dart';
 import '../models/column_preset.dart';
 import '../models/column_template.dart';
 import '../models/custom_column_definition.dart';
+import '../models/shot_record.dart';
 
 enum ProjectHistoryScope { workspace }
 
@@ -80,9 +81,10 @@ class BatchFieldUpdate {
 }
 
 class CreateShotCommand extends AppCommand {
-  const CreateShotCommand({required this.projectId});
+  const CreateShotCommand({required this.projectId, this.seedShot});
 
   final String projectId;
+  final ShotRecord? seedShot;
 
   @override
   String get label => 'CreateShot';
@@ -303,10 +305,7 @@ class AddFixedFieldOptionCommand extends AppCommand {
 }
 
 class CreatePlanSectionCommand extends AppCommand {
-  const CreatePlanSectionCommand({
-    required this.projectId,
-    required this.name,
-  });
+  const CreatePlanSectionCommand({required this.projectId, required this.name});
 
   final String projectId;
   final String name;

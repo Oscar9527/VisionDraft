@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/bootstrap/providers.dart';
 import '../../../../core/widgets/surface_card.dart';
+import '../../../ai_storyboard/presentation/ai_storyboard_sheet.dart';
 import '../../../project_workspace/application/project_workspace_controller.dart';
 import '../../../project_workspace/domain/models/board_preset.dart';
 import '../../../project_workspace/domain/models/column_preset.dart';
@@ -111,6 +112,14 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   label: const Text('新建镜头'),
                 ),
                 OutlinedButton.icon(
+                  onPressed: () => showAiStoryboardSheet(
+                    context,
+                    projectId: widget.projectId,
+                  ),
+                  icon: const Icon(Icons.auto_awesome_rounded),
+                  label: const Text('AI生成'),
+                ),
+                OutlinedButton.icon(
                   onPressed: history.canUndo ? controller.undo : null,
                   icon: const Icon(Icons.undo_rounded),
                   label: const Text('撤销'),
@@ -165,6 +174,8 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           onUndo: controller.undo,
           onRedo: controller.redo,
           onCreateShot: controller.createShot,
+          onOpenAiStoryboard: () =>
+              showAiStoryboardSheet(context, projectId: widget.projectId),
           onToggleBatchMode: () {
             setState(() {
               _isBatchMode = !_isBatchMode;
@@ -1229,6 +1240,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onCreateShot,
+    required this.onOpenAiStoryboard,
     required this.onToggleBatchMode,
     required this.onChooseSelection,
     required this.onOpenBatchEdit,
@@ -1245,6 +1257,7 @@ class _EditorToolbar extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onCreateShot;
+  final VoidCallback onOpenAiStoryboard;
   final VoidCallback onToggleBatchMode;
   final ValueChanged<_SelectionAction> onChooseSelection;
   final VoidCallback? onOpenBatchEdit;
@@ -1348,6 +1361,21 @@ class _EditorToolbar extends StatelessWidget {
                     tooltip: '重做',
                     icon: Icons.redo_rounded,
                     onPressed: canRedo ? onRedo : null,
+                  ),
+                  const SizedBox(width: 6),
+                  FilledButton.icon(
+                    onPressed: onOpenAiStoryboard,
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                    label: const Text('AI生成'),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      minimumSize: const Size(0, 28),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   FilledButton.icon(

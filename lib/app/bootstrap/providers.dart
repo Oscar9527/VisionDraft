@@ -6,6 +6,9 @@ import '../theme/theme_mode_controller.dart';
 import '../../core/command/command_bus.dart';
 import '../../core/history/history_manager.dart';
 import '../../core/logging/app_logger.dart';
+import '../../features/ai_storyboard/application/ai_storyboard_controller.dart';
+import '../../features/ai_storyboard/application/generate_storyboard_from_script_use_case.dart';
+import '../../features/ai_storyboard/infrastructure/ai_provider_settings_repository.dart';
 import '../../features/project_library/application/project_library_controller.dart';
 import '../../features/project_library/domain/project_library_repository.dart';
 import '../../features/project_workspace/application/project_workspace_command_service.dart';
@@ -111,6 +114,24 @@ final assetHealthCheckUseCaseProvider = Provider<AssetHealthCheckUseCase>((
   );
 });
 
+final aiProviderSettingsRepositoryProvider =
+    Provider<AiProviderSettingsRepository>((ref) {
+      return AiProviderSettingsRepository(
+        preferencesService: ref.watch(appPreferencesServiceProvider),
+      );
+    });
+
+final aiStoryboardGeneratorProvider = Provider<AiStoryboardGenerator>((ref) {
+  return FakeAiStoryboardGenerator();
+});
+
+final generateStoryboardUseCaseProvider =
+    Provider<GenerateStoryboardFromScriptUseCase>((ref) {
+      return GenerateStoryboardFromScriptUseCase(
+        generator: ref.watch(aiStoryboardGeneratorProvider),
+      );
+    });
+
 final syncAdapterProvider = Provider<SyncAdapter>((ref) {
   return const NoopSyncAdapter();
 });
@@ -150,3 +171,8 @@ final editorGridSessionProvider =
       EditorGridSessionState,
       String
     >(EditorGridSessionController.new);
+
+final aiStoryboardControllerProvider =
+    NotifierProvider.family<AiStoryboardController, AiStoryboardState, String>(
+      AiStoryboardController.new,
+    );

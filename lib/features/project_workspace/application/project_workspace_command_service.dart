@@ -46,17 +46,34 @@ class ProjectWorkspaceCommandService {
     commandBus.register<DeleteCustomColumnCommand>(_handleDeleteCustomColumn);
     commandBus.register<SaveColumnTemplateCommand>(_handleSaveColumnTemplate);
     commandBus.register<ApplyColumnTemplateCommand>(_handleApplyColumnTemplate);
-    commandBus.register<DeleteColumnTemplateCommand>(_handleDeleteColumnTemplate);
+    commandBus.register<DeleteColumnTemplateCommand>(
+      _handleDeleteColumnTemplate,
+    );
     commandBus.register<AddFixedFieldOptionCommand>(_handleAddFixedFieldOption);
     commandBus.register<CreatePlanSectionCommand>(_handleCreatePlanSection);
     commandBus.register<RenamePlanSectionCommand>(_handleRenamePlanSection);
     commandBus.register<DeletePlanSectionCommand>(_handleDeletePlanSection);
-    commandBus.register<ReorderPlanSectionShotsCommand>(_handleReorderPlanSectionShots);
-    commandBus.register<UnassignShotFromPlanCommand>(_handleUnassignShotFromPlan);
+    commandBus.register<ReorderPlanSectionShotsCommand>(
+      _handleReorderPlanSectionShots,
+    );
+    commandBus.register<UnassignShotFromPlanCommand>(
+      _handleUnassignShotFromPlan,
+    );
   }
 
-  Future<void> createShot(String projectId) async {
-    await commandBus.dispatch(CreateShotCommand(projectId: projectId));
+  Future<ShotRecord> createShot(
+    String projectId, {
+    ShotRecord? seedShot,
+  }) async {
+    final effectiveSeedShot = seedShot == null
+        ? null
+        : seedShot.id.trim().isEmpty
+        ? seedShot.copyWith(id: _uuid.v4())
+        : seedShot;
+    final result = await commandBus.dispatch(
+      CreateShotCommand(projectId: projectId, seedShot: effectiveSeedShot),
+    );
+    return result.payload! as ShotRecord;
   }
 
   Future<void> updateField({
@@ -86,11 +103,7 @@ class ProjectWorkspaceCommandService {
         projectId: projectId,
         updates: [
           for (final shotId in shotIds)
-            BatchFieldUpdate(
-              shotId: shotId,
-              fieldKey: fieldKey,
-              value: value,
-            ),
+            BatchFieldUpdate(shotId: shotId, fieldKey: fieldKey, value: value),
         ],
       ),
     );
@@ -308,10 +321,7 @@ class ProjectWorkspaceCommandService {
     required String sectionId,
   }) async {
     await commandBus.dispatch(
-      DeletePlanSectionCommand(
-        projectId: projectId,
-        sectionId: sectionId,
-      ),
+      DeletePlanSectionCommand(projectId: projectId, sectionId: sectionId),
     );
   }
 
@@ -347,15 +357,23 @@ class ProjectWorkspaceCommandService {
   }
 
   Future<CommandResult> _handleCreateShot(CreateShotCommand command) async {
-    final created = await workspaceRepository.createShot(command.projectId);
+    final created = await workspaceRepository.createShot(
+      command.projectId,
+      seedShot: command.seedShot,
+    );
     final seed = created.copyWith();
     return CommandResult(
+      payload: created,
       historyEntry: HistoryEntry(
         label: command.label,
         createdAt: DateTime.now(),
-        undo: () => workspaceRepository.deleteShot(command.projectId, created.id),
+        undo: () =>
+            workspaceRepository.deleteShot(command.projectId, created.id),
         redo: () async {
-          await workspaceRepository.createShot(command.projectId, seedShot: seed);
+          await workspaceRepository.createShot(
+            command.projectId,
+            seedShot: seed,
+          );
         },
       ),
     );
@@ -367,9 +385,12 @@ class ProjectWorkspaceCommandService {
     final shots = await workspaceRepository.loadShots(command.projectId);
     final shot = shots.firstWhere((item) => item.id == command.shotId);
     final before = _readShotFieldValue(shot, command.fieldKey);
-    final beforePayload = before is AssetRef ? AssetRefPayload.fromAssetRef(before) : before;
-    final afterPayload =
-        command.value is AssetRef ? AssetRefPayload.fromAssetRef(command.value as AssetRef) : command.value;
+    final beforePayload = before is AssetRef
+        ? AssetRefPayload.fromAssetRef(before)
+        : before;
+    final afterPayload = command.value is AssetRef
+        ? AssetRefPayload.fromAssetRef(command.value as AssetRef)
+        : command.value;
 
     await workspaceRepository.updateShotField(
       command.projectId,
@@ -461,8 +482,10 @@ class ProjectWorkspaceCommandService {
       historyEntry: HistoryEntry(
         label: command.label,
         createdAt: DateTime.now(),
-        undo: () => workspaceRepository.reorderShots(command.projectId, originalIds),
-        redo: () => workspaceRepository.reorderShots(command.projectId, nextIds),
+        undo: () =>
+            workspaceRepository.reorderShots(command.projectId, originalIds),
+        redo: () =>
+            workspaceRepository.reorderShots(command.projectId, nextIds),
       ),
     );
   }
@@ -483,7 +506,10 @@ class ProjectWorkspaceCommandService {
         createdAt: DateTime.now(),
         undo: () async {
           if (previousSectionId == null) {
-            await workspaceRepository.unassignShot(command.projectId, command.shotId);
+            await workspaceRepository.unassignShot(
+              command.projectId,
+              command.shotId,
+            );
             return;
           }
           await workspaceRepository.assignShotToSection(
@@ -626,8 +652,12 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleUpdateViewPreset(
     UpdateViewPresetCommand command,
   ) async {
-    final currentBoard = await workspaceRepository.loadBoardPreset(command.projectId);
-    final currentColumn = await workspaceRepository.loadColumnPreset(command.projectId);
+    final currentBoard = await workspaceRepository.loadBoardPreset(
+      command.projectId,
+    );
+    final currentColumn = await workspaceRepository.loadColumnPreset(
+      command.projectId,
+    );
     final nextBoard = command.boardPreset;
     final nextColumn = command.columnPreset;
 
@@ -635,7 +665,10 @@ class ProjectWorkspaceCommandService {
       await workspaceRepository.updateBoardPreset(command.projectId, nextBoard);
     }
     if (nextColumn != null) {
-      await workspaceRepository.updateColumnPreset(command.projectId, nextColumn);
+      await workspaceRepository.updateColumnPreset(
+        command.projectId,
+        nextColumn,
+      );
     }
 
     return CommandResult(
@@ -644,18 +677,30 @@ class ProjectWorkspaceCommandService {
         createdAt: DateTime.now(),
         undo: () async {
           if (nextBoard != null) {
-            await workspaceRepository.updateBoardPreset(command.projectId, currentBoard);
+            await workspaceRepository.updateBoardPreset(
+              command.projectId,
+              currentBoard,
+            );
           }
           if (nextColumn != null) {
-            await workspaceRepository.updateColumnPreset(command.projectId, currentColumn);
+            await workspaceRepository.updateColumnPreset(
+              command.projectId,
+              currentColumn,
+            );
           }
         },
         redo: () async {
           if (nextBoard != null) {
-            await workspaceRepository.updateBoardPreset(command.projectId, nextBoard);
+            await workspaceRepository.updateBoardPreset(
+              command.projectId,
+              nextBoard,
+            );
           }
           if (nextColumn != null) {
-            await workspaceRepository.updateColumnPreset(command.projectId, nextColumn);
+            await workspaceRepository.updateColumnPreset(
+              command.projectId,
+              nextColumn,
+            );
           }
         },
       ),
@@ -665,9 +710,12 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleCreateCustomColumn(
     CreateCustomColumnCommand command,
   ) async {
-    final previousPreset = await workspaceRepository.loadColumnPreset(command.projectId);
-    final previousTemplates =
-        await workspaceRepository.loadColumnTemplates(command.projectId);
+    final previousPreset = await workspaceRepository.loadColumnPreset(
+      command.projectId,
+    );
+    final previousTemplates = await workspaceRepository.loadColumnTemplates(
+      command.projectId,
+    );
     final now = DateTime.now();
     final created = await workspaceRepository.createCustomColumn(
       projectId: command.projectId,
@@ -677,7 +725,10 @@ class ProjectWorkspaceCommandService {
       createdAt: now,
       updatedAt: now,
     );
-    final nextPreset = _appendFieldToActivePreset(previousPreset, created.fieldKey);
+    final nextPreset = _appendFieldToActivePreset(
+      previousPreset,
+      created.fieldKey,
+    );
     await workspaceRepository.updateColumnPreset(command.projectId, nextPreset);
 
     for (final template in previousTemplates) {
@@ -770,7 +821,9 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleRenameCustomColumn(
     RenameCustomColumnCommand command,
   ) async {
-    final columns = await workspaceRepository.loadCustomColumns(command.projectId);
+    final columns = await workspaceRepository.loadCustomColumns(
+      command.projectId,
+    );
     final column = columns.firstWhere((item) => item.id == command.columnId);
     await workspaceRepository.renameCustomColumn(
       projectId: command.projectId,
@@ -798,14 +851,21 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleDeleteCustomColumn(
     DeleteCustomColumnCommand command,
   ) async {
-    final columns = await workspaceRepository.loadCustomColumns(command.projectId);
+    final columns = await workspaceRepository.loadCustomColumns(
+      command.projectId,
+    );
     final target = columns.firstWhere((item) => item.id == command.columnId);
     final shots = await workspaceRepository.loadShots(command.projectId);
-    final preset = await workspaceRepository.loadColumnPreset(command.projectId);
-    final templates = await workspaceRepository.loadColumnTemplates(command.projectId);
+    final preset = await workspaceRepository.loadColumnPreset(
+      command.projectId,
+    );
+    final templates = await workspaceRepository.loadColumnTemplates(
+      command.projectId,
+    );
     final targetCustomOptions = [...target.customOptions];
     final shotValues = <String, Object?>{
-      for (final shot in shots) shot.id: shot.customFieldValues[target.fieldKey],
+      for (final shot in shots)
+        shot.id: shot.customFieldValues[target.fieldKey],
     };
 
     await workspaceRepository.deleteCustomColumn(
@@ -828,7 +888,10 @@ class ProjectWorkspaceCommandService {
             createdAt: target.createdAt,
             updatedAt: DateTime.now(),
           );
-          await workspaceRepository.updateColumnPreset(command.projectId, preset);
+          await workspaceRepository.updateColumnPreset(
+            command.projectId,
+            preset,
+          );
           for (final template in templates) {
             await workspaceRepository.saveColumnTemplate(
               projectId: command.projectId,
@@ -867,9 +930,15 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleSaveColumnTemplate(
     SaveColumnTemplateCommand command,
   ) async {
-    final active = await workspaceRepository.loadColumnPreset(command.projectId);
-    final templates = await workspaceRepository.loadColumnTemplates(command.projectId);
-    final existing = templates.where((item) => item.name == command.name).firstOrNull;
+    final active = await workspaceRepository.loadColumnPreset(
+      command.projectId,
+    );
+    final templates = await workspaceRepository.loadColumnTemplates(
+      command.projectId,
+    );
+    final existing = templates
+        .where((item) => item.name == command.name)
+        .firstOrNull;
     final previous = existing;
     final saved = await workspaceRepository.saveColumnTemplate(
       projectId: command.projectId,
@@ -915,9 +984,15 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleApplyColumnTemplate(
     ApplyColumnTemplateCommand command,
   ) async {
-    final active = await workspaceRepository.loadColumnPreset(command.projectId);
-    final templates = await workspaceRepository.loadColumnTemplates(command.projectId);
-    final template = templates.firstWhere((item) => item.id == command.templateId);
+    final active = await workspaceRepository.loadColumnPreset(
+      command.projectId,
+    );
+    final templates = await workspaceRepository.loadColumnTemplates(
+      command.projectId,
+    );
+    final template = templates.firstWhere(
+      (item) => item.id == command.templateId,
+    );
     final nextPreset = active.copyWith(
       visibleFieldKeys: template.visibleFieldKeys,
       fieldOrderKeys: template.fieldOrderKeys,
@@ -928,8 +1003,12 @@ class ProjectWorkspaceCommandService {
       historyEntry: HistoryEntry(
         label: command.label,
         createdAt: DateTime.now(),
-        undo: () => workspaceRepository.updateColumnPreset(command.projectId, active),
-        redo: () => workspaceRepository.updateColumnPreset(command.projectId, nextPreset),
+        undo: () =>
+            workspaceRepository.updateColumnPreset(command.projectId, active),
+        redo: () => workspaceRepository.updateColumnPreset(
+          command.projectId,
+          nextPreset,
+        ),
       ),
     );
   }
@@ -937,8 +1016,12 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleDeleteColumnTemplate(
     DeleteColumnTemplateCommand command,
   ) async {
-    final templates = await workspaceRepository.loadColumnTemplates(command.projectId);
-    final template = templates.firstWhere((item) => item.id == command.templateId);
+    final templates = await workspaceRepository.loadColumnTemplates(
+      command.projectId,
+    );
+    final template = templates.firstWhere(
+      (item) => item.id == command.templateId,
+    );
     await workspaceRepository.deleteColumnTemplate(
       projectId: command.projectId,
       templateId: command.templateId,
@@ -971,15 +1054,17 @@ class ProjectWorkspaceCommandService {
   Future<CommandResult> _handleAddFixedFieldOption(
     AddFixedFieldOptionCommand command,
   ) async {
-    final before =
-        await workspaceRepository.loadFixedFieldCustomOptions(command.projectId);
+    final before = await workspaceRepository.loadFixedFieldCustomOptions(
+      command.projectId,
+    );
     await workspaceRepository.addFixedFieldCustomOption(
       projectId: command.projectId,
       fieldKey: command.fieldKey,
       option: command.option,
     );
-    final after =
-        await workspaceRepository.loadFixedFieldCustomOptions(command.projectId);
+    final after = await workspaceRepository.loadFixedFieldCustomOptions(
+      command.projectId,
+    );
 
     return CommandResult(
       historyEntry: HistoryEntry(
@@ -1016,10 +1101,8 @@ class ProjectWorkspaceCommandService {
           command.projectId,
           section.id,
         ),
-        redo: () => workspaceRepository.createPlanSection(
-          command.projectId,
-          section,
-        ),
+        redo: () =>
+            workspaceRepository.createPlanSection(command.projectId, section),
       ),
     );
   }
@@ -1028,7 +1111,9 @@ class ProjectWorkspaceCommandService {
     RenamePlanSectionCommand command,
   ) async {
     final board = await workspaceRepository.loadPlanBoard(command.projectId);
-    final section = board.sections.firstWhere((item) => item.id == command.sectionId);
+    final section = board.sections.firstWhere(
+      (item) => item.id == command.sectionId,
+    );
     await workspaceRepository.renamePlanSection(
       command.projectId,
       command.sectionId,
@@ -1056,9 +1141,16 @@ class ProjectWorkspaceCommandService {
     DeletePlanSectionCommand command,
   ) async {
     final board = await workspaceRepository.loadPlanBoard(command.projectId);
-    final section = board.sections.firstWhere((item) => item.id == command.sectionId);
-    final orderIndex = board.sections.indexWhere((item) => item.id == command.sectionId);
-    await workspaceRepository.deletePlanSection(command.projectId, command.sectionId);
+    final section = board.sections.firstWhere(
+      (item) => item.id == command.sectionId,
+    );
+    final orderIndex = board.sections.indexWhere(
+      (item) => item.id == command.sectionId,
+    );
+    await workspaceRepository.deletePlanSection(
+      command.projectId,
+      command.sectionId,
+    );
     return CommandResult(
       historyEntry: HistoryEntry(
         label: command.label,
@@ -1100,7 +1192,9 @@ class ProjectWorkspaceCommandService {
     ReorderPlanSectionShotsCommand command,
   ) async {
     final board = await workspaceRepository.loadPlanBoard(command.projectId);
-    final section = board.sections.firstWhere((item) => item.id == command.sectionId);
+    final section = board.sections.firstWhere(
+      (item) => item.id == command.sectionId,
+    );
     final previousIds = [...section.shotIds];
     await workspaceRepository.reorderSectionShots(
       command.projectId,
@@ -1143,10 +1237,8 @@ class ProjectWorkspaceCommandService {
           command.shotId,
           previousSectionId,
         ),
-        redo: () => workspaceRepository.unassignShot(
-          command.projectId,
-          command.shotId,
-        ),
+        redo: () =>
+            workspaceRepository.unassignShot(command.projectId, command.shotId),
       ),
     );
   }
@@ -1171,7 +1263,10 @@ class ProjectWorkspaceCommandService {
     };
   }
 
-  ColumnPreset _appendFieldToActivePreset(ColumnPreset preset, String fieldKey) {
+  ColumnPreset _appendFieldToActivePreset(
+    ColumnPreset preset,
+    String fieldKey,
+  ) {
     final visible = [...preset.visibleFieldKeys];
     if (!visible.contains(fieldKey)) {
       visible.add(fieldKey);
