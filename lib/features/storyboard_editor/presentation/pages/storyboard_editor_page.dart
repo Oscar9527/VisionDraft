@@ -225,10 +225,15 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   context,
                   selectedShotIds: _selectedShotIds.toList(),
                   currentRowHeights: gridSession.rowHeightsByShotId,
+                  zoomPercent: gridSession.zoomPercent,
                   onApply: (height) =>
                       gridSessionController.setRowHeights(
                         _selectedShotIds,
-                        height,
+                        height /
+                            ((gridSession.zoomPercent / 100).clamp(
+                              0.7,
+                              1.5,
+                            )),
                       ),
                 ),
           onOpenBoardSettings: () => _showBoardSettingsSheet(
@@ -1226,20 +1231,25 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     BuildContext context, {
     required List<String> selectedShotIds,
     required Map<String, double> currentRowHeights,
+    required double zoomPercent,
     required ValueChanged<double> onApply,
   }) async {
+    final uiScale = (zoomPercent / 100).clamp(0.7, 1.5);
+    final displayMin = 84.0 * uiScale;
+    final displayMax = 280.0 * uiScale;
     final explicitHeights = selectedShotIds
         .map((shotId) => currentRowHeights[shotId])
         .whereType<double>()
+        .map((height) => height * uiScale)
         .toList();
     final initialHeight = explicitHeights.isEmpty
-        ? 108.0
+        ? 108.0 * uiScale
         : explicitHeights.reduce((sum, value) => sum + value) /
             explicitHeights.length;
     final controller = TextEditingController(
       text: initialHeight.toStringAsFixed(0),
     );
-    var currentHeight = initialHeight.clamp(84.0, 280.0);
+    var currentHeight = initialHeight.clamp(displayMin, displayMax);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1273,15 +1283,15 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                         return;
                       }
                       setSheetState(() {
-                        currentHeight = parsed.clamp(84.0, 280.0);
+                        currentHeight = parsed.clamp(displayMin, displayMax);
                       });
                     },
                   ),
                   const SizedBox(height: 18),
                   Slider(
                     value: currentHeight,
-                    min: 84,
-                    max: 280,
+                    min: displayMin,
+                    max: displayMax,
                     divisions: 28,
                     label: currentHeight.toStringAsFixed(0),
                     onChanged: (value) {
@@ -1293,14 +1303,14 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   ),
                   Row(
                     children: [
-                      Text('84'),
+                      Text(displayMin.toStringAsFixed(0)),
                       const Spacer(),
                       Text(
                         '当前 ${currentHeight.toStringAsFixed(0)}',
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       const Spacer(),
-                      Text('280'),
+                      Text(displayMax.toStringAsFixed(0)),
                     ],
                   ),
                   const Spacer(),
@@ -1317,7 +1327,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                           final parsed =
                               double.tryParse(controller.text.trim()) ??
                               currentHeight;
-                          onApply(parsed.clamp(84.0, 280.0));
+                          onApply(parsed.clamp(displayMin, displayMax));
                           Navigator.of(sheetContext).pop();
                         },
                         child: const Text('应用'),

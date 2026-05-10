@@ -150,17 +150,23 @@ class PdfExportService {
                 scale: layout.headerScale,
               ),
               pw.SizedBox(height: layout.headerSpacing),
-              pw.Table(
-                border: _shotSheetTableBorder(),
-                defaultVerticalAlignment:
-                    pw.TableCellVerticalAlignment.middle,
-                columnWidths: {
-                  for (var index = 0; index < visibleFields.length; index++)
-                    index: pw.FixedColumnWidth(
-                      layout.columnWidths[visibleFields[index]]!,
-                    ),
-                },
-                children: tableRows,
+              pw.Align(
+                alignment: pw.Alignment.topCenter,
+                child: pw.SizedBox(
+                  width: layout.tableWidth,
+                  child: pw.Table(
+                    border: _shotSheetTableBorder(),
+                    defaultVerticalAlignment:
+                        pw.TableCellVerticalAlignment.middle,
+                    columnWidths: {
+                      for (var index = 0; index < visibleFields.length; index++)
+                        index: pw.FixedColumnWidth(
+                          layout.columnWidths[visibleFields[index]]!,
+                        ),
+                    },
+                    children: tableRows,
+                  ),
+                ),
               ),
             ],
           ),
@@ -460,9 +466,10 @@ class PdfExportService {
       return sessionWidth;
     }
     if (_isImageField(payload, fieldKey)) {
-      return fieldKey == ShotFieldKey.frameImage.storageKey ? 260 : 220;
+      return (fieldKey == ShotFieldKey.frameImage.storageKey ? 260 : 220)
+          .toDouble();
     }
-    return switch (fieldKey) {
+    return (switch (fieldKey) {
       'shotNo' => 58,
       'durationSec' => 60,
       'shotSize' => 64,
@@ -477,7 +484,7 @@ class PdfExportService {
       'cameraRig' => 100,
       'focalLength' => 84,
       _ => 160,
-    }.toDouble();
+    }).toDouble();
   }
 
   double _sheetRowHeightValue(
@@ -489,9 +496,10 @@ class PdfExportService {
     if (sessionHeight != null && sessionHeight > 0) {
       return sessionHeight;
     }
-    return visibleFields.any((fieldKey) => _isImageField(payload, fieldKey))
-        ? 108
-        : 76;
+    return (visibleFields.any((fieldKey) => _isImageField(payload, fieldKey))
+            ? 108
+            : 76)
+        .toDouble();
   }
 
   Future<pw.TableRow> _shotSheetRow({
@@ -878,48 +886,74 @@ class PdfExportService {
     const headerHeight = 46.0;
     const headerSpacing = 8.0;
     final hasImage = visibleFields.any((fieldKey) => _isImageField(payload, fieldKey));
+    final editorScale = _editorScale(payload);
+    final editorFontBias = math.pow(editorScale, 0.38).toDouble();
+    final imagePaddingBias = math.pow(editorScale, 0.14).toDouble();
+    final headerScaleBias = math.pow(editorScale, 0.12).toDouble();
+    final boardTextBias =
+        payload.boardPreset.textScaleMode == TextScaleMode.large ? 1.08 : 0.96;
     final availableWidth =
         PdfPageFormat.a4.landscape.availableWidth - margin.left - margin.right;
     final availableHeight =
         PdfPageFormat.a4.landscape.availableHeight - margin.top - margin.bottom;
     final rowCount = math.max(payload.shots.length, 1);
-    final headerRowHeight = _clampDouble(
-      availableHeight / (rowCount + 1) * 0.58,
-      18,
-      hasImage ? 26 : 24,
+    final desiredColumnWidthTotal = visibleFields.fold<double>(
+      0,
+      (sum, fieldKey) => sum + math.max(1.0, columnWidths[fieldKey] ?? 1.0),
     );
-    final tableHeight = math.max(
+    final desiredRowHeightTotal = payload.shots.fold<double>(
+      0,
+      (sum, shot) => sum + math.max(1.0, rowHeights[shot.id] ?? 1.0),
+    );
+    final desiredAverageRowHeight = desiredRowHeightTotal / rowCount;
+    final desiredHeaderRowHeight = _clampDouble(
+      desiredAverageRowHeight * (hasImage ? 0.4 : 0.48),
+      20,
+      hasImage ? 34 : 30,
+    );
+    final targetTableHeight = math.max(
       24.0,
-      availableHeight - headerHeight - headerSpacing - headerRowHeight,
+      availableHeight - headerHeight - headerSpacing,
     );
-    final normalizedColumnWidths = _fitFieldWidthsToPage(
-      payload: payload,
-      visibleFields: visibleFields,
-      desiredWidths: columnWidths,
-      targetWidth: availableWidth,
+    final fitScale = math.min(
+      availableWidth / math.max(desiredColumnWidthTotal, 1),
+      targetTableHeight /
+          math.max(desiredHeaderRowHeight + desiredRowHeightTotal, 1),
     );
-    final normalizedRowHeights = _fitRowHeightsToPage(
-      payload: payload,
-      desiredHeights: rowHeights,
-      targetHeight: tableHeight,
-      hasImage: hasImage,
-    );
+    final normalizedColumnWidths = {
+      for (final fieldKey in visibleFields)
+        fieldKey: math.max(1.0, columnWidths[fieldKey] ?? 1.0) * fitScale,
+    };
+    final normalizedRowHeights = {
+      for (final shot in payload.shots)
+        shot.id: math.max(1.0, rowHeights[shot.id] ?? 1.0) * fitScale,
+    };
+    final headerRowHeight = desiredHeaderRowHeight * fitScale;
+    final tableWidth = desiredColumnWidthTotal * fitScale;
     final averageRowHeight = normalizedRowHeights.isEmpty
         ? (hasImage ? 42.0 : 30.0)
         : normalizedRowHeights.values.fold<double>(0, (sum, value) => sum + value) /
             normalizedRowHeights.length;
     final bodyFontSize = _clampDouble(
-      averageRowHeight * (hasImage ? 0.18 : 0.22),
+      averageRowHeight * (hasImage ? 0.18 : 0.22) * editorFontBias * boardTextBias,
       5.2,
-      9.2,
+      10.2,
     );
     final headerFontSize = _clampDouble(bodyFontSize + 0.9, 6.2, 9.6);
     final maxTextLines = math.max(
       2,
       math.min(6, (averageRowHeight / (bodyFontSize * 1.35)).floor()),
     );
-    final imagePadding = _clampDouble(averageRowHeight * 0.055, 2.0, 4.0);
-    final headerScale = _clampDouble(bodyFontSize / 8.2, 0.82, 1.0);
+    final imagePadding = _clampDouble(
+      averageRowHeight * 0.055 / imagePaddingBias,
+      1.8,
+      4.4,
+    );
+    final headerScale = _clampDouble(
+      (bodyFontSize / 8.2) * headerScaleBias,
+      0.82,
+      1.08,
+    );
 
     return _ShotSheetLayout(
       margin: margin,
@@ -932,56 +966,14 @@ class PdfExportService {
       imagePadding: imagePadding,
       defaultRowHeight: averageRowHeight,
       contentWidth: availableWidth,
+      tableWidth: tableWidth,
       columnWidths: normalizedColumnWidths,
       rowHeights: normalizedRowHeights,
     );
   }
 
-  Map<String, double> _fitFieldWidthsToPage({
-    required ExportPayload payload,
-    required List<String> visibleFields,
-    required Map<String, double> desiredWidths,
-    required double targetWidth,
-  }) {
-    final desiredWidthTotal = visibleFields.fold<double>(
-      0,
-      (sum, fieldKey) => sum + math.max(1.0, desiredWidths[fieldKey] ?? 1.0),
-    );
-    final scale = targetWidth / math.max(desiredWidthTotal, 1);
-    return {
-      for (final fieldKey in visibleFields)
-        fieldKey: math.max(1.0, desiredWidths[fieldKey] ?? 1.0) * scale,
-    };
-  }
-
-  Map<String, double> _fitRowHeightsToPage({
-    required ExportPayload payload,
-    required Map<String, double> desiredHeights,
-    required double targetHeight,
-    required bool hasImage,
-  }) {
-    if (payload.shots.isEmpty) {
-      return const {};
-    }
-    final desiredHeightTotal = payload.shots.fold<double>(
-      0,
-      (sum, shot) =>
-          sum +
-          math.max(
-            1.0,
-            desiredHeights[shot.id] ?? (hasImage ? 108.0 : 76.0),
-          ),
-    );
-    final scale = targetHeight / math.max(desiredHeightTotal, 1);
-    return {
-      for (final shot in payload.shots)
-        shot.id:
-            math.max(
-              1.0,
-              desiredHeights[shot.id] ?? (hasImage ? 108.0 : 76.0),
-            ) *
-            scale,
-    };
+  double _editorScale(ExportPayload payload) {
+    return _clampDouble(payload.editorScalePercent / 100, 0.7, 1.5);
   }
 }
 
@@ -997,6 +989,7 @@ class _ShotSheetLayout {
     required this.imagePadding,
     required this.defaultRowHeight,
     required this.contentWidth,
+    required this.tableWidth,
     required this.columnWidths,
     required this.rowHeights,
   });
@@ -1011,6 +1004,7 @@ class _ShotSheetLayout {
   final double imagePadding;
   final double defaultRowHeight;
   final double contentWidth;
+  final double tableWidth;
   final Map<String, double> columnWidths;
   final Map<String, double> rowHeights;
 }

@@ -67,6 +67,8 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         final previewKey = [
           _selectedType.name,
           previewFilename,
+          _gridPreviewFingerprint(gridSession),
+          _snapshotPreviewFingerprint(snapshot),
           _brandLogoPath ?? '',
           _showDefaultBrandLogo ? 'default-logo' : 'no-default-logo',
           _brandNameController.text,
@@ -150,6 +152,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       shots: snapshot.shots,
       columnPreset: snapshot.columnPreset,
       effectiveFieldOrderKeys: gridSession.effectiveFieldOrderKeys,
+      editorScalePercent: gridSession.zoomPercent,
       effectiveColumnWidths: gridSession.columnWidthsByFieldKey,
       effectiveRowHeights: gridSession.rowHeightsByShotId,
       fieldLabelsByKey: {
@@ -167,6 +170,46 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       callSheet: snapshot.callSheet,
       documentType: type,
     );
+  }
+
+  String _gridPreviewFingerprint(EditorGridSessionState gridSession) {
+    final widths = gridSession.columnWidthsByFieldKey.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final heights = gridSession.rowHeightsByShotId.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return Object.hashAll([
+      gridSession.zoomPercent.toStringAsFixed(1),
+      ...gridSession.effectiveFieldOrderKeys,
+      ...widths.map((entry) => '${entry.key}:${entry.value.toStringAsFixed(2)}'),
+      ...heights.map((entry) => '${entry.key}:${entry.value.toStringAsFixed(2)}'),
+    ]).toString();
+  }
+
+  String _snapshotPreviewFingerprint(ProjectWorkspaceSnapshot snapshot) {
+    return Object.hashAll([
+      ...snapshot.columnPreset.visibleFieldKeys,
+      ...snapshot.columnPreset.fieldOrderKeys,
+      for (final shot in snapshot.shots)
+        Object.hashAll([
+          shot.id,
+          shot.orderIndex,
+          shot.shotNo,
+          shot.shotSize,
+          shot.durationSec,
+          shot.content,
+          shot.dialogue,
+          shot.notes,
+          shot.sceneExpectation,
+          shot.audio,
+          shot.cameraAngle,
+          shot.cameraMove,
+          shot.cameraRig,
+          shot.focalLength,
+          shot.frameImage?.uri ?? '',
+          shot.referenceImage?.uri ?? '',
+          ...shot.customFieldValues.entries.map((entry) => '${entry.key}:${entry.value}'),
+        ]),
+    ]).toString();
   }
 
   Future<void> _pickBrandLogo() async {

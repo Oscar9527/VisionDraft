@@ -27,6 +27,7 @@ class ExportPayload {
     required this.shots,
     required this.columnPreset,
     required this.effectiveFieldOrderKeys,
+    this.editorScalePercent = 100,
     this.effectiveColumnWidths = const <String, double>{},
     this.effectiveRowHeights = const <String, double>{},
     this.fieldLabelsByKey = const <String, String>{},
@@ -41,6 +42,7 @@ class ExportPayload {
   final List<ShotRecord> shots;
   final ColumnPreset columnPreset;
   final List<String> effectiveFieldOrderKeys;
+  final double editorScalePercent;
   final Map<String, double> effectiveColumnWidths;
   final Map<String, double> effectiveRowHeights;
   final Map<String, String> fieldLabelsByKey;

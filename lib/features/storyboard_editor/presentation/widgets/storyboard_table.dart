@@ -245,10 +245,10 @@ class _StoryboardTableState extends State<StoryboardTable> {
                                       fieldKey: entry.value,
                                       label: _labelFor(entry.value),
                                       width: resolvedWidths[entry.value]!,
-                                      minWidth: _minimumColumnWidth(
+                                      minWidth: _minimumDisplayColumnWidth(
                                         entry.value,
                                       ),
-                                      maxWidth: _maximumColumnWidth(
+                                      maxWidth: _maximumDisplayColumnWidth(
                                         entry.value,
                                       ),
                                       uiScale: _uiScale,
@@ -376,6 +376,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
                                                 fixedFieldCustomOptions: widget
                                                     .fixedFieldCustomOptions,
                                                 boardPreset: widget.boardPreset,
+                                                uiScale: _uiScale,
                                                 showLeadingBorder:
                                                     entry.key > 0,
                                                 focusNode: _focusNodeFor(
@@ -428,8 +429,8 @@ class _StoryboardTableState extends State<StoryboardTable> {
                               ),
                               _RowResizeHandle(
                                 initialHeight: rowHeight,
-                                minHeight: _minimumRowHeight,
-                                maxHeight: _maximumRowHeight,
+                                minHeight: _minimumDisplayRowHeight,
+                                maxHeight: _maximumDisplayRowHeight,
                                 onHeightChanged: (height) =>
                                     _applyRowHeightChange(shot.id, height),
                               ),
@@ -631,7 +632,10 @@ class _StoryboardTableState extends State<StoryboardTable> {
     return null;
   }
 
-  double _columnWidth(String fieldKey) {
+  double get _minimumDisplayRowHeight => _minimumRowHeight * _uiScale;
+  double get _maximumDisplayRowHeight => _maximumRowHeight * _uiScale;
+
+  double _logicalColumnWidth(String fieldKey) {
     final stored = widget.columnWidths[fieldKey];
     if (stored != null) {
       return _clampDouble(
@@ -641,6 +645,10 @@ class _StoryboardTableState extends State<StoryboardTable> {
       );
     }
     return _defaultColumnWidth(fieldKey);
+  }
+
+  double _displayColumnWidth(String fieldKey) {
+    return _logicalColumnWidth(fieldKey) * _uiScale;
   }
 
   double _defaultColumnWidth(String fieldKey) {
@@ -721,6 +729,14 @@ class _StoryboardTableState extends State<StoryboardTable> {
     return math.max(base, _minimumColumnWidth(fieldKey));
   }
 
+  double _minimumDisplayColumnWidth(String fieldKey) {
+    return _minimumColumnWidth(fieldKey) * _uiScale;
+  }
+
+  double _maximumDisplayColumnWidth(String fieldKey) {
+    return _maximumColumnWidth(fieldKey) * _uiScale;
+  }
+
   double _estimateHeaderLabelWidth(String label) {
     var units = 0;
     for (final rune in label.runes) {
@@ -734,7 +750,8 @@ class _StoryboardTableState extends State<StoryboardTable> {
     double availableWidth,
   ) {
     final widths = <String, double>{
-      for (final fieldKey in visibleFields) fieldKey: _columnWidth(fieldKey),
+      for (final fieldKey in visibleFields)
+        fieldKey: _displayColumnWidth(fieldKey),
     };
     if (visibleFields.isEmpty || availableWidth <= 0) {
       return widths;
@@ -751,13 +768,16 @@ class _StoryboardTableState extends State<StoryboardTable> {
 
     var targets = visibleFields
         .where(_prefersWidthExpansion)
-        .where((fieldKey) => widths[fieldKey]! < _maximumColumnWidth(fieldKey))
+        .where(
+          (fieldKey) => widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
+        )
         .toList();
     if (targets.isEmpty) {
       targets = visibleFields
           .where((fieldKey) => fieldKey != ShotFieldKey.shotNo.storageKey)
           .where(
-            (fieldKey) => widths[fieldKey]! < _maximumColumnWidth(fieldKey),
+            (fieldKey) =>
+                widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
           )
           .toList();
     }
@@ -767,7 +787,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
       final nextTargets = <String>[];
       for (final fieldKey in targets) {
         final current = widths[fieldKey]!;
-        final maxWidth = _maximumColumnWidth(fieldKey);
+        final maxWidth = _maximumDisplayColumnWidth(fieldKey);
         final delta = math.min(share, maxWidth - current);
         widths[fieldKey] = current + delta;
         remaining -= delta;
@@ -803,9 +823,9 @@ class _StoryboardTableState extends State<StoryboardTable> {
   double _rowHeight(String shotId) {
     final stored = widget.rowHeights[shotId];
     return _clampDouble(
-      stored ?? _defaultRowHeight,
-      _minimumRowHeight,
-      _maximumRowHeight,
+      (stored ?? _defaultRowHeight) * _uiScale,
+      _minimumDisplayRowHeight,
+      _maximumDisplayRowHeight,
     );
   }
 
@@ -874,15 +894,16 @@ class _StoryboardTableState extends State<StoryboardTable> {
     if (onRowHeightChanged == null) {
       return;
     }
+    final logicalHeight = height / math.max(_uiScale, 0.001);
     if (widget.isBatchMode &&
         widget.selectedShotIds.length > 1 &&
         widget.selectedShotIds.contains(shotId)) {
       for (final selectedShotId in widget.selectedShotIds) {
-        onRowHeightChanged(selectedShotId, height);
+        onRowHeightChanged(selectedShotId, logicalHeight);
       }
       return;
     }
-    onRowHeightChanged(shotId, height);
+    onRowHeightChanged(shotId, logicalHeight);
   }
 }
 
@@ -1107,7 +1128,10 @@ class _HeaderCellState extends State<_HeaderCell> {
                     widget.minWidth,
                     widget.maxWidth,
                   );
-                  widget.onWidthChanged?.call(widget.fieldKey, next);
+                  widget.onWidthChanged?.call(
+                    widget.fieldKey,
+                    next / math.max(widget.uiScale, 0.001),
+                  );
                 },
                 child: SizedBox(
                   width: 8,
@@ -1332,6 +1356,7 @@ class _EditableCell extends StatefulWidget {
     required this.customColumns,
     required this.fixedFieldCustomOptions,
     required this.boardPreset,
+    required this.uiScale,
     required this.showLeadingBorder,
     required this.focusNode,
     required this.onFocused,
@@ -1352,6 +1377,7 @@ class _EditableCell extends StatefulWidget {
   final List<CustomColumnDefinition> customColumns;
   final Map<String, List<String>> fixedFieldCustomOptions;
   final BoardPreset boardPreset;
+  final double uiScale;
   final bool showLeadingBorder;
   final FocusNode focusNode;
   final VoidCallback onFocused;
@@ -1469,8 +1495,25 @@ class _EditableCellState extends State<_EditableCell> {
     return fixedFieldIsLongText(widget.fieldKey);
   }
 
+  double get _cellHorizontalPadding =>
+      _clampDouble(8 * widget.uiScale, 6, 16);
+
+  double get _cellVerticalPadding =>
+      _clampDouble(6 * widget.uiScale, 4, 12);
+
+  double get _textFontSize {
+    final base = widget.boardPreset.textScaleMode == TextScaleMode.large
+        ? 14.0
+        : 13.0;
+    return _clampDouble(base * widget.uiScale, 11.0, 18.0);
+  }
+
   double get _imagePreviewHeight {
-    return _clampDouble(widget.height - 8, 64, widget.height - 4);
+    return _clampDouble(
+      widget.height - (10 * widget.uiScale),
+      64 * widget.uiScale,
+      math.max(64 * widget.uiScale, widget.height - (4 * widget.uiScale)),
+    );
   }
 
   List<String> get _options {
@@ -1592,7 +1635,12 @@ class _EditableCellState extends State<_EditableCell> {
     final content = Container(
       width: widget.width,
       height: widget.height,
-      padding: const EdgeInsets.fromLTRB(5, 4, 5, 5),
+      padding: EdgeInsets.fromLTRB(
+        _clampDouble(5 * widget.uiScale, 4, 10),
+        _clampDouble(4 * widget.uiScale, 3, 8),
+        _clampDouble(5 * widget.uiScale, 4, 10),
+        _clampDouble(5 * widget.uiScale, 4, 10),
+      ),
       decoration: BoxDecoration(
         border: Border(
           left: widget.showLeadingBorder
@@ -1664,6 +1712,7 @@ class _EditableCellState extends State<_EditableCell> {
       child: TextField(
         controller: _controller,
         focusNode: widget.focusNode,
+        style: TextStyle(fontSize: _textFontSize),
         keyboardType: _isNumericField
             ? TextInputType.number
             : TextInputType.text,
@@ -1671,11 +1720,14 @@ class _EditableCellState extends State<_EditableCell> {
         maxLines: _isLongTextField ? 3 : 1,
         onTap: widget.onFocused,
         onSubmitted: (_) => _commitTextIfNeeded(),
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           isDense: true,
           hintText: '输入内容',
-          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: _cellHorizontalPadding,
+            vertical: _cellVerticalPadding,
+          ),
+          border: const OutlineInputBorder(),
         ),
       ),
     );
@@ -1694,6 +1746,7 @@ class _EditableCellState extends State<_EditableCell> {
         asset: asset,
         previewHeight: _imagePreviewHeight,
         fitMode: widget.boardPreset.fitMode,
+        uiScale: widget.uiScale,
         onImportManaged: () => _pickAsset(AssetMode.managed),
         onImportLinked: () => _pickAsset(AssetMode.linked),
         onRelink: asset == null ? null : _relinkAsset,
@@ -1717,16 +1770,20 @@ class _EditableCellState extends State<_EditableCell> {
         borderRadius: BorderRadius.circular(4),
         onTap: () => _showDropdownSheet(context, currentValue),
         child: InputDecorator(
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             isDense: true,
-            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: _cellHorizontalPadding,
+              vertical: _cellVerticalPadding,
+            ),
+            border: const OutlineInputBorder(),
           ),
           child: Row(
             children: [
               Expanded(
                 child: Text(
                   currentValue ?? '请选择',
+                  style: TextStyle(fontSize: _textFontSize),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -1878,6 +1935,7 @@ class _ImageFieldCell extends StatelessWidget {
     required this.asset,
     required this.previewHeight,
     required this.fitMode,
+    required this.uiScale,
     required this.onImportManaged,
     required this.onImportLinked,
     required this.onRelink,
@@ -1887,6 +1945,7 @@ class _ImageFieldCell extends StatelessWidget {
   final AssetRef? asset;
   final double previewHeight;
   final ImageFitMode fitMode;
+  final double uiScale;
   final VoidCallback onImportManaged;
   final VoidCallback onImportLinked;
   final VoidCallback? onRelink;
@@ -1911,7 +1970,9 @@ class _ImageFieldCell extends StatelessWidget {
                 width: double.infinity,
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerHighest.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(
+                    _clampDouble(6 * uiScale, 4, 10),
+                  ),
                   border: Border.all(
                     color: Theme.of(
                       context,
@@ -1920,7 +1981,9 @@ class _ImageFieldCell extends StatelessWidget {
                 ),
                 child: canPreview
                     ? ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(
+                          _clampDouble(6 * uiScale, 4, 10),
+                        ),
                         child: Image.file(
                           file,
                           width: double.infinity,
@@ -1937,8 +2000,8 @@ class _ImageFieldCell extends StatelessWidget {
                       ),
               ),
               Positioned(
-                top: 4,
-                right: 4,
+                top: _clampDouble(4 * uiScale, 3, 8),
+                right: _clampDouble(4 * uiScale, 3, 8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: scheme.surface.withValues(alpha: 0.92),
@@ -1946,9 +2009,9 @@ class _ImageFieldCell extends StatelessWidget {
                     border: Border.all(color: scheme.outlineVariant),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 1,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _clampDouble(2 * uiScale, 1, 4),
+                      vertical: _clampDouble(1 * uiScale, 1, 3),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1956,23 +2019,27 @@ class _ImageFieldCell extends StatelessWidget {
                         _MiniIconAction(
                           tooltip: hasAsset ? '替换图片' : '导入图片',
                           icon: Icons.upload_file_outlined,
+                          uiScale: uiScale,
                           onPressed: onImportManaged,
                         ),
                         _MiniIconAction(
                           tooltip: '外链图片',
                           icon: Icons.link_outlined,
+                          uiScale: uiScale,
                           onPressed: onImportLinked,
                         ),
                         if (hasAsset && onRelink != null)
                           _MiniIconAction(
                             tooltip: '重连图片',
                             icon: Icons.sync_outlined,
+                            uiScale: uiScale,
                             onPressed: onRelink,
                           ),
                         if (hasAsset && onClear != null)
                           _MiniIconAction(
                             tooltip: '清除图片',
                             icon: Icons.delete_outline_rounded,
+                            uiScale: uiScale,
                             onPressed: onClear,
                           ),
                       ],
@@ -1983,12 +2050,14 @@ class _ImageFieldCell extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 4),
+        SizedBox(height: _clampDouble(4 * uiScale, 3, 8)),
         Text(
           hasAsset ? '已关联图片' : '未关联图片',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.labelSmall,
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(fontSize: _clampDouble(11 * uiScale, 10, 14)),
         ),
       ],
     );
@@ -1999,11 +2068,13 @@ class _MiniIconAction extends StatelessWidget {
   const _MiniIconAction({
     required this.tooltip,
     required this.icon,
+    required this.uiScale,
     required this.onPressed,
   });
 
   final String tooltip;
   final IconData icon;
+  final double uiScale;
   final VoidCallback? onPressed;
 
   @override
@@ -2013,8 +2084,11 @@ class _MiniIconAction extends StatelessWidget {
       onPressed: onPressed,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
-      icon: Icon(icon, size: 14),
+      constraints: BoxConstraints.tightFor(
+        width: _clampDouble(24 * uiScale, 22, 34),
+        height: _clampDouble(24 * uiScale, 22, 34),
+      ),
+      icon: Icon(icon, size: _clampDouble(14 * uiScale, 12, 18)),
     );
   }
 }
