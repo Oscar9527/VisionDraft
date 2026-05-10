@@ -915,21 +915,21 @@ class PdfExportService {
       24.0,
       availableHeight - headerHeight - headerSpacing,
     );
-    final fitScale = math.min(
-      availableWidth / math.max(desiredColumnWidthTotal, 1),
-      targetTableHeight /
-          math.max(desiredHeaderRowHeight + desiredRowHeightTotal, 1),
-    );
+    final columnFitScale =
+        availableWidth / math.max(desiredColumnWidthTotal, 1);
+    final rowFitScale =
+        targetTableHeight /
+        math.max(desiredHeaderRowHeight + desiredRowHeightTotal, 1);
     final normalizedColumnWidths = {
       for (final fieldKey in visibleFields)
-        fieldKey: math.max(1.0, columnWidths[fieldKey] ?? 1.0) * fitScale,
+        fieldKey: math.max(1.0, columnWidths[fieldKey] ?? 1.0) * columnFitScale,
     };
     final normalizedRowHeights = {
       for (final shot in payload.shots)
-        shot.id: math.max(1.0, rowHeights[shot.id] ?? 1.0) * fitScale,
+        shot.id: math.max(1.0, rowHeights[shot.id] ?? 1.0) * rowFitScale,
     };
-    final headerRowHeight = desiredHeaderRowHeight * fitScale;
-    final tableWidth = desiredColumnWidthTotal * fitScale;
+    final headerRowHeight = desiredHeaderRowHeight * rowFitScale;
+    final tableWidth = desiredColumnWidthTotal * columnFitScale;
     final averageRowHeight = normalizedRowHeights.isEmpty
         ? (hasImage ? 42.0 : 30.0)
         : normalizedRowHeights.values.fold<double>(0, (sum, value) => sum + value) /

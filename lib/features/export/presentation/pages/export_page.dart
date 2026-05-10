@@ -930,7 +930,10 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
         return LayoutBuilder(
           builder: (context, constraints) {
             final canvasWidth = math.max(1.0, constraints.maxWidth - 32);
-            final fitScale = canvasWidth / pages.first.width;
+            final canvasHeight = math.max(1.0, constraints.maxHeight - 32);
+            final widthFitScale = canvasWidth / pages.first.width;
+            final heightFitScale = canvasHeight / pages.first.height;
+            final fitScale = math.min(widthFitScale, heightFitScale);
             final effectiveScale = widget.fitToCanvas
                 ? fitScale
                 : fitScale * widget.zoom;
@@ -943,10 +946,12 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     for (final page in pages) ...[
                       Container(
                         width: page.width * effectiveScale,
+                        height: page.height * effectiveScale,
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(10),
@@ -963,6 +968,7 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
                           child: Image.memory(
                             page.bytes,
                             width: page.width * effectiveScale,
+                            height: page.height * effectiveScale,
                             fit: BoxFit.fitWidth,
                             filterQuality: FilterQuality.high,
                           ),
