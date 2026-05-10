@@ -29,6 +29,7 @@ dependencies:
   intl: ^0.20.2
   printing: ^5.14.2
   pdf: ^3.11.3
+  excel_community: ^1.0.10
   logger: ^2.6.1
   rxdart: ^0.28.0
   cupertino_icons: ^1.0.8

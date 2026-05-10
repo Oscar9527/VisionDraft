@@ -28,6 +28,7 @@ import '../../infrastructure/filesystem/project_bundle_service.dart';
 import '../../infrastructure/imaging/asset_fingerprint_service.dart';
 import '../../infrastructure/imaging/asset_health_check_use_case.dart';
 import '../../infrastructure/printing/pdf_export_service.dart';
+import '../../infrastructure/printing/excel_export_service.dart';
 import '../../infrastructure/printing/print_service.dart';
 import '../../infrastructure/sync_stub/noop_sync_adapter.dart';
 import '../router/app_router.dart';
@@ -146,6 +147,10 @@ final syncAdapterProvider = Provider<SyncAdapter>((ref) {
 
 final pdfExportServiceProvider = Provider<PdfExportService>((ref) {
   return const PdfExportService();
+});
+
+final excelExportServiceProvider = Provider<ExcelExportService>((ref) {
+  return const ExcelExportService();
 });
 
 final printServiceProvider = Provider<PrintService>((ref) {
