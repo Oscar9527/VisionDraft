@@ -1128,33 +1128,16 @@ class PdfExportService {
     }
 
     final bodyLimit = math.max(96.0, pageBodyHeight - headerRowHeight);
-    final totalBodyHeight = shots.fold<double>(
-      0,
-      (sum, shot) => sum + (rowHeights[shot.id] ?? 0),
-    );
-    var pageCount = math.max(1, (totalBodyHeight / bodyLimit).ceil());
-    while (totalBodyHeight > pageCount * bodyLimit) {
-      pageCount += 1;
-    }
-    final targetBodyHeight = totalBodyHeight / pageCount;
-
     final pages = <List<ShotRecord>>[];
     var currentPage = <ShotRecord>[];
     var currentHeight = 0.0;
 
-    for (var index = 0; index < shots.length; index++) {
-      final shot = shots[index];
+    for (final shot in shots) {
       final shotHeight = rowHeights[shot.id] ?? 0;
-      final remainingShotsAfterCurrent = shots.length - index - 1;
-      final remainingPagesAfterCurrent = pageCount - pages.length - 1;
       final wouldOverflow =
           currentPage.isNotEmpty && currentHeight + shotHeight > bodyLimit;
-      final reachedTargetHeight =
-          currentPage.isNotEmpty &&
-          currentHeight >= targetBodyHeight &&
-          remainingShotsAfterCurrent >= remainingPagesAfterCurrent;
 
-      if (wouldOverflow || reachedTargetHeight) {
+      if (wouldOverflow) {
         pages.add(currentPage);
         currentPage = <ShotRecord>[];
         currentHeight = 0.0;

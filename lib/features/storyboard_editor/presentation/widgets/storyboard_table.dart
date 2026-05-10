@@ -523,7 +523,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
             PopupMenuButton<_RowAction>(
               tooltip: '行操作',
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+              constraints: _rowMenuConstraints,
               onSelected: (action) async {
                 switch (action) {
                   case _RowAction.insertAbove:
@@ -911,6 +911,16 @@ enum _ColumnAction { hide, moveLeft, moveRight, rename, delete }
 
 enum _RowAction { insertAbove, insertBelow, deleteRow }
 
+const BoxConstraints _columnMenuConstraints = BoxConstraints(
+  minWidth: 168,
+  maxWidth: 220,
+);
+
+const BoxConstraints _rowMenuConstraints = BoxConstraints(
+  minWidth: 168,
+  maxWidth: 220,
+);
+
 class _LeadingHeaderCell extends StatelessWidget {
   const _LeadingHeaderCell({required this.width, required this.isBatchMode});
 
@@ -1182,7 +1192,7 @@ class _HeaderCellState extends State<_HeaderCell> {
             PopupMenuButton<_ColumnAction>(
               tooltip: '列操作',
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+              constraints: _columnMenuConstraints,
               onSelected: widget.onAction,
               itemBuilder: (context) => [
                 if (!widget.isShotNo)
