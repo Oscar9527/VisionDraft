@@ -6,6 +6,8 @@ import '../models/custom_column_definition.dart';
 import '../models/plan_board.dart';
 import '../models/project_bundle.dart';
 import '../models/shot_record.dart';
+import '../models/storyboard_row.dart';
+import '../models/storyboard_scene.dart';
 
 class ProjectWorkspaceSnapshot {
   const ProjectWorkspaceSnapshot({
@@ -15,6 +17,8 @@ class ProjectWorkspaceSnapshot {
     required this.columnTemplates,
     required this.customColumns,
     required this.fixedFieldCustomOptions,
+    required this.scenes,
+    required this.storyboardRows,
     required this.boardPreset,
     required this.planBoard,
     required this.callSheet,
@@ -28,6 +32,8 @@ class ProjectWorkspaceSnapshot {
   final List<ColumnTemplate> columnTemplates;
   final List<CustomColumnDefinition> customColumns;
   final Map<String, List<String>> fixedFieldCustomOptions;
+  final List<StoryboardScene> scenes;
+  final List<StoryboardRow> storyboardRows;
   final BoardPreset boardPreset;
   final PlanBoard planBoard;
   final CallSheet callSheet;
@@ -51,6 +57,8 @@ class ProjectWorkspaceSnapshot {
       columnTemplates: const [],
       customColumns: const [],
       fixedFieldCustomOptions: const {},
+      scenes: const [],
+      storyboardRows: const [],
       boardPreset: BoardPreset.initial(),
       planBoard: const PlanBoard(unassignedShotIds: [], sections: []),
       callSheet: const CallSheet(
@@ -69,6 +77,8 @@ class ProjectWorkspaceSnapshot {
     List<ColumnTemplate>? columnTemplates,
     List<CustomColumnDefinition>? customColumns,
     Map<String, List<String>>? fixedFieldCustomOptions,
+    List<StoryboardScene>? scenes,
+    List<StoryboardRow>? storyboardRows,
     BoardPreset? boardPreset,
     PlanBoard? planBoard,
     CallSheet? callSheet,
@@ -84,6 +94,8 @@ class ProjectWorkspaceSnapshot {
       customColumns: customColumns ?? this.customColumns,
       fixedFieldCustomOptions:
           fixedFieldCustomOptions ?? this.fixedFieldCustomOptions,
+      scenes: scenes ?? this.scenes,
+      storyboardRows: storyboardRows ?? this.storyboardRows,
       boardPreset: boardPreset ?? this.boardPreset,
       planBoard: planBoard ?? this.planBoard,
       callSheet: callSheet ?? this.callSheet,

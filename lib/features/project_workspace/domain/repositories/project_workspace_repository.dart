@@ -8,6 +8,7 @@ import '../models/custom_field_value.dart';
 import '../models/plan_board.dart';
 import '../models/project_bundle.dart';
 import '../models/shot_record.dart';
+import '../models/storyboard_scene.dart';
 
 abstract interface class ProjectWorkspaceRepository {
   Future<ProjectBundle> loadBundle(String projectId);
@@ -23,6 +24,8 @@ abstract interface class ProjectWorkspaceRepository {
   Future<List<CustomColumnDefinition>> loadCustomColumns(String projectId);
 
   Future<Map<String, List<String>>> loadFixedFieldCustomOptions(String projectId);
+
+  Future<List<StoryboardScene>> loadScenes(String projectId);
 
   Future<Map<String, Map<String, CustomFieldValue>>> loadCustomFieldValuesByShot(
     String projectId,
@@ -40,6 +43,7 @@ abstract interface class ProjectWorkspaceRepository {
     String projectId, {
     ShotRecord? seedShot,
     int? insertIndex,
+    String? sceneId,
   });
 
   Future<void> deleteShot(String projectId, String shotId);
@@ -178,4 +182,25 @@ abstract interface class ProjectWorkspaceRepository {
   );
 
   Future<void> reorderShots(String projectId, List<String> orderedShotIds);
+
+  Future<StoryboardScene> createScene({
+    required String projectId,
+    required int insertIndex,
+    String? sceneId,
+    String name,
+    StoryboardSceneNumberMode numberMode,
+    String manualNumber,
+  });
+
+  Future<void> updateScene(String projectId, StoryboardScene scene);
+
+  Future<void> deleteScene(String projectId, String sceneId);
+
+  Future<void> reorderScenes(String projectId, List<String> orderedSceneIds);
+
+  Future<void> applySceneShotStructure({
+    required String projectId,
+    required List<String> orderedSceneIds,
+    required Map<String, List<String>> orderedShotIdsByScene,
+  });
 }

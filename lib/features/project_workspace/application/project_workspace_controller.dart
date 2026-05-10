@@ -8,6 +8,8 @@ import '../domain/models/column_preset.dart';
 import '../domain/models/custom_column_definition.dart';
 import '../domain/models/shot_record.dart';
 import '../domain/models/shot_fields.dart';
+import '../domain/models/storyboard_row.dart';
+import '../domain/models/storyboard_scene.dart';
 import '../domain/queries/project_workspace_snapshot.dart';
 
 class ProjectWorkspaceController
@@ -30,6 +32,7 @@ class ProjectWorkspaceController
       final fixedFieldCustomOptions = await repo.loadFixedFieldCustomOptions(
         projectId,
       );
+      final scenes = await repo.loadScenes(projectId);
       final boardPreset = await repo.loadBoardPreset(projectId);
       final planBoard = await repo.loadPlanBoard(projectId);
       final callSheet = await repo.loadCallSheet(projectId);
@@ -40,6 +43,8 @@ class ProjectWorkspaceController
         columnTemplates: columnTemplates,
         customColumns: customColumns,
         fixedFieldCustomOptions: fixedFieldCustomOptions,
+        scenes: scenes,
+        storyboardRows: _buildStoryboardRows(scenes, shots),
         boardPreset: boardPreset,
         planBoard: planBoard,
         callSheet: callSheet,
@@ -50,16 +55,20 @@ class ProjectWorkspaceController
     }
   }
 
-  Future<void> createShot({int? insertIndex}) async {
+  Future<void> createShot({int? insertIndex, String? sceneId}) async {
     final created = await ref
         .read(workspaceCommandServiceProvider)
-        .createShot(arg, insertIndex: insertIndex);
+        .createShot(arg, insertIndex: insertIndex, sceneId: sceneId);
     final nextShots = [...state.shots];
     final targetIndex =
         insertIndex?.clamp(0, nextShots.length) ?? created.orderIndex;
     nextShots.insert(targetIndex, created);
     state = state.copyWith(
       shots: _normalizeOrderIndexes(nextShots),
+      storyboardRows: _buildStoryboardRows(
+        state.scenes,
+        _normalizeOrderIndexes(nextShots),
+      ),
       isLoading: false,
       clearError: true,
     );
@@ -72,6 +81,12 @@ class ProjectWorkspaceController
     state = state.copyWith(
       shots: _normalizeOrderIndexes(
         state.shots.where((shot) => shot.id != shotId).toList(),
+      ),
+      storyboardRows: _buildStoryboardRows(
+        state.scenes,
+        _normalizeOrderIndexes(
+          state.shots.where((shot) => shot.id != shotId).toList(),
+        ),
       ),
       isLoading: false,
       clearError: true,
@@ -95,6 +110,7 @@ class ProjectWorkspaceController
     final nextShots = await repo.loadShots(arg);
     state = state.copyWith(
       shots: nextShots,
+      storyboardRows: _buildStoryboardRows(state.scenes, nextShots),
       isLoading: false,
       clearError: true,
     );
@@ -124,6 +140,7 @@ class ProjectWorkspaceController
         : state.customColumns;
     state = state.copyWith(
       shots: _replaceShot(updatedShot),
+      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShot(updatedShot)),
       fixedFieldCustomOptions: fixedFieldCustomOptions,
       customColumns: customColumns,
       isLoading: false,
@@ -150,6 +167,7 @@ class ProjectWorkspaceController
     final updatedShot = await repo.loadShot(arg, shotId);
     state = state.copyWith(
       shots: _replaceShot(updatedShot),
+      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShot(updatedShot)),
       isLoading: false,
       clearError: true,
     );
@@ -172,6 +190,7 @@ class ProjectWorkspaceController
     final updatedShot = await repo.loadShot(arg, shotId);
     state = state.copyWith(
       shots: _replaceShot(updatedShot),
+      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShot(updatedShot)),
       isLoading: false,
       clearError: true,
     );
@@ -280,11 +299,98 @@ class ProjectWorkspaceController
         : state.customColumns;
     state = state.copyWith(
       shots: _replaceShots(updatedShots),
+      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShots(updatedShots)),
       fixedFieldCustomOptions: fixedFieldCustomOptions,
       customColumns: customColumns,
       isLoading: false,
       clearError: true,
     );
+  }
+
+  Future<void> createScene({required int insertIndex, String name = ''}) async {
+    await ref
+        .read(workspaceCommandServiceProvider)
+        .createScene(projectId: arg, insertIndex: insertIndex, name: name);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final scenes = await repo.loadScenes(arg);
+    state = state.copyWith(
+      scenes: scenes,
+      storyboardRows: _buildStoryboardRows(scenes, state.shots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> updateScene(StoryboardScene scene) async {
+    await ref
+        .read(workspaceCommandServiceProvider)
+        .updateScene(projectId: arg, scene: scene);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final scenes = await repo.loadScenes(arg);
+    state = state.copyWith(
+      scenes: scenes,
+      storyboardRows: _buildStoryboardRows(scenes, state.shots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> deleteEmptyScene(String sceneId) async {
+    await ref
+        .read(workspaceCommandServiceProvider)
+        .deleteEmptyScene(projectId: arg, sceneId: sceneId);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final scenes = await repo.loadScenes(arg);
+    state = state.copyWith(
+      scenes: scenes,
+      storyboardRows: _buildStoryboardRows(scenes, state.shots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  List<StoryboardRow> _buildStoryboardRows(
+    List<StoryboardScene> scenes,
+    List<ShotRecord> shots,
+  ) {
+    if (scenes.isEmpty) {
+      return const <StoryboardRow>[];
+    }
+    final shotsByScene = <String, List<ShotRecord>>{};
+    for (final shot in shots) {
+      shotsByScene.putIfAbsent(shot.sceneId, () => <ShotRecord>[]).add(shot);
+    }
+    final orderedScenes = [...scenes]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final hideSingleDefaultScene =
+        orderedScenes.length == 1 &&
+        orderedScenes.first.name.trim().isEmpty &&
+        orderedScenes.first.numberMode == StoryboardSceneNumberMode.auto;
+    final rows = <StoryboardRow>[];
+    for (var index = 0; index < orderedScenes.length; index++) {
+      final scene = orderedScenes[index];
+      final sceneShots = [...(shotsByScene[scene.id] ?? const <ShotRecord>[])]
+        ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+      if (!hideSingleDefaultScene) {
+        rows.add(
+          SceneHeaderRow(
+            scene: scene,
+            autoNumber: index + 1,
+            shotCount: sceneShots.length,
+          ),
+        );
+      }
+      for (var shotIndex = 0; shotIndex < sceneShots.length; shotIndex++) {
+        rows.add(
+          StoryboardShotRow(
+            scene: scene,
+            autoNumber: index + 1,
+            shot: sceneShots[shotIndex],
+            sceneShotIndex: shotIndex,
+          ),
+        );
+      }
+    }
+    return rows;
   }
 
   Future<void> createCustomColumn({
@@ -421,6 +527,7 @@ class ProjectWorkspaceController
         .importSeedShotsBatch(arg, seedShots: seedShots);
     state = state.copyWith(
       shots: importedShots,
+      storyboardRows: _buildStoryboardRows(state.scenes, importedShots),
       isLoading: false,
       clearError: true,
     );
@@ -457,6 +564,7 @@ class ProjectWorkspaceController
       columnPreset: columnPreset,
       columnTemplates: columnTemplates,
       customColumns: customColumns,
+      storyboardRows: _buildStoryboardRows(state.scenes, shots),
       isLoading: false,
       clearError: true,
     );
@@ -491,6 +599,7 @@ class ProjectWorkspaceController
     return ShotRecord(
       id: '',
       orderIndex: orderIndex,
+      sceneId: state.scenes.isEmpty ? 'default-scene' : state.scenes.first.id,
       shotNo: draft.shotNo,
       shotSize: draft.shotSize,
       durationSec: draft.durationSec,

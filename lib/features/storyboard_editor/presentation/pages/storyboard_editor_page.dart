@@ -9,7 +9,9 @@ import '../../../project_workspace/domain/models/board_preset.dart';
 import '../../../project_workspace/domain/models/column_preset.dart';
 import '../../../project_workspace/domain/models/column_template.dart';
 import '../../../project_workspace/domain/models/custom_column_definition.dart';
+import '../../../project_workspace/domain/models/shot_record.dart';
 import '../../../project_workspace/domain/models/shot_fields.dart';
+import '../../../project_workspace/domain/models/storyboard_scene.dart';
 import '../widgets/storyboard_table.dart';
 
 class StoryboardEditorPage extends ConsumerStatefulWidget {
@@ -30,6 +32,7 @@ class StoryboardEditorPage extends ConsumerStatefulWidget {
 class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
   bool _isBatchMode = false;
   final Set<String> _selectedShotIds = <String>{};
+  String? _activeSceneId;
 
   static const List<({double value, String label})> _aspectRatioOptions = [
     (value: 1 / 1, label: '1:1'),
@@ -85,6 +88,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
       0,
       (sum, shot) => sum + shot.durationSec,
     );
+    _activeSceneId ??= snapshot.scenes.isNotEmpty ? snapshot.scenes.first.id : null;
 
     if (snapshot.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -107,7 +111,8 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
               runSpacing: 8,
               children: [
                 FilledButton.icon(
-                  onPressed: controller.createShot,
+                  onPressed: () =>
+                      controller.createShot(sceneId: _activeSceneId),
                   icon: const Icon(Icons.add_rounded),
                   label: const Text('新建镜头'),
                 ),
@@ -173,7 +178,10 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           canRedo: history.canRedo,
           onUndo: controller.undo,
           onRedo: controller.redo,
-          onCreateShot: controller.createShot,
+          onCreateShot: () => controller.createShot(sceneId: _activeSceneId),
+          onCreateScene: () => controller.createScene(
+            insertIndex: snapshot.scenes.length,
+          ),
           onOpenAiStoryboard: () =>
               showAiStoryboardSheet(context, projectId: widget.projectId),
           onToggleBatchMode: () {
@@ -244,6 +252,63 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           onOpenColumnSettings: () =>
               _openColumnSettings(context, controller, snapshot),
         ),
+        _SceneStrip(
+          scenes: snapshot.scenes,
+          shots: snapshot.shots,
+          activeSceneId: _activeSceneId,
+          onSelectScene: (sceneId) {
+            setState(() {
+              _activeSceneId = sceneId;
+            });
+          },
+          onCreateScene: () => controller.createScene(
+            insertIndex: snapshot.scenes.length,
+          ),
+          onRenameScene: (scene) async {
+            final next = await _showNamePrompt(
+              context,
+              title: '重命名场',
+              label: '场名称',
+              initialValue: scene.name,
+            );
+            if (next == null) {
+              return;
+            }
+            await controller.updateScene(
+              scene.copyWith(name: next.trim(), updatedAt: DateTime.now()),
+            );
+          },
+          onToggleNumberMode: (scene, useManual) async {
+            await controller.updateScene(
+              scene.copyWith(
+                numberMode: useManual
+                    ? StoryboardSceneNumberMode.manual
+                    : StoryboardSceneNumberMode.auto,
+                updatedAt: DateTime.now(),
+              ),
+            );
+          },
+          onEditManualNumber: (scene) async {
+            final next = await _showNamePrompt(
+              context,
+              title: '设置场号',
+              label: '场号',
+              initialValue: scene.manualNumber,
+            );
+            if (next == null) {
+              return;
+            }
+            await controller.updateScene(
+              scene.copyWith(
+                numberMode: StoryboardSceneNumberMode.manual,
+                manualNumber: next.trim(),
+                updatedAt: DateTime.now(),
+              ),
+            );
+          },
+          onDeleteScene: (scene) => controller.deleteEmptyScene(scene.id),
+        ),
+        const SizedBox(height: 8),
         Expanded(
           child: StoryboardTable(
             shots: snapshot.shots,
@@ -276,9 +341,15 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             onImportAsset: controller.importAsset,
             onRelinkAsset: controller.relinkAsset,
             onInsertRowAbove: (rowIndex) =>
-                controller.createShot(insertIndex: rowIndex),
+                controller.createShot(
+                  insertIndex: rowIndex,
+                  sceneId: _activeSceneId,
+                ),
             onInsertRowBelow: (rowIndex) =>
-                controller.createShot(insertIndex: rowIndex + 1),
+                controller.createShot(
+                  insertIndex: rowIndex + 1,
+                  sceneId: _activeSceneId,
+                ),
             onDeleteRow: controller.deleteShot,
             onAddColumn: () async => _showCreateCustomColumnSheet(
               context,
@@ -303,31 +374,26 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                 ),
               );
             },
-            onMoveColumnLeft: (fieldKey) async {
-              gridSessionController.moveFieldByOffset(
-                fieldKey: fieldKey,
-                offset: -1,
-                fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
-              );
-            },
-            onMoveColumnRight: (fieldKey) async {
-              gridSessionController.moveFieldByOffset(
-                fieldKey: fieldKey,
-                offset: 1,
-                fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
-              );
-            },
             onReorderField:
                 ({
                   required draggedFieldKey,
                   required targetFieldKey,
                   required placeAfter,
                 }) {
-                  gridSessionController.reorderField(
+                  final nextOrder = gridSessionController.reorderField(
                     draggedFieldKey: draggedFieldKey,
                     targetFieldKey: targetFieldKey,
                     placeAfter: placeAfter,
                     fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
+                  );
+                  if (nextOrder == null) {
+                    return;
+                  }
+                  controller.updateColumnPreset(
+                    snapshot.columnPreset.copyWith(
+                      fieldOrderKeys: nextOrder,
+                      updatedAt: DateTime.now(),
+                    ),
                   );
                 },
             onRenameColumn: (columnId) async {
@@ -1394,6 +1460,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onCreateShot,
+    required this.onCreateScene,
     required this.onOpenAiStoryboard,
     required this.onToggleBatchMode,
     required this.onChooseSelection,
@@ -1412,6 +1479,7 @@ class _EditorToolbar extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onCreateShot;
+  final VoidCallback onCreateScene;
   final VoidCallback onOpenAiStoryboard;
   final VoidCallback onToggleBatchMode;
   final ValueChanged<_SelectionAction> onChooseSelection;
@@ -1540,19 +1608,37 @@ class _EditorToolbar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  FilledButton.icon(
-                    onPressed: onCreateShot,
-                    icon: const Icon(Icons.add_rounded, size: 16),
-                    label: const Text('新建镜头'),
-                    style: FilledButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
+                  MenuAnchor(
+                    builder: (context, controller, child) {
+                      return FilledButton.icon(
+                        onPressed: () {
+                          controller.isOpen ? controller.close() : controller.open();
+                        },
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        label: const Text('新建'),
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          minimumSize: const Size(0, 28),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      );
+                    },
+                    menuChildren: [
+                      MenuItemButton(
+                        onPressed: onCreateShot,
+                        leadingIcon: const Icon(Icons.video_call_outlined),
+                        child: const Text('新建镜头'),
                       ),
-                      minimumSize: const Size(0, 28),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
+                      MenuItemButton(
+                        onPressed: onCreateScene,
+                        leadingIcon: const Icon(Icons.view_agenda_outlined),
+                        child: const Text('新建场'),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1573,6 +1659,142 @@ class _ToolbarDivider extends StatelessWidget {
       width: 1,
       height: 28,
       color: Theme.of(context).dividerColor.withValues(alpha: 0.75),
+    );
+  }
+}
+
+class _SceneStrip extends StatelessWidget {
+  const _SceneStrip({
+    required this.scenes,
+    required this.shots,
+    required this.activeSceneId,
+    required this.onSelectScene,
+    required this.onCreateScene,
+    required this.onRenameScene,
+    required this.onToggleNumberMode,
+    required this.onEditManualNumber,
+    required this.onDeleteScene,
+  });
+
+  final List<StoryboardScene> scenes;
+  final List<ShotRecord> shots;
+  final String? activeSceneId;
+  final ValueChanged<String> onSelectScene;
+  final VoidCallback onCreateScene;
+  final Future<void> Function(StoryboardScene scene) onRenameScene;
+  final Future<void> Function(StoryboardScene scene, bool useManual)
+      onToggleNumberMode;
+  final Future<void> Function(StoryboardScene scene) onEditManualNumber;
+  final Future<void> Function(StoryboardScene scene) onDeleteScene;
+
+  @override
+  Widget build(BuildContext context) {
+    final orderedScenes = [...scenes]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final shotsByScene = <String, int>{};
+    for (final shot in shots) {
+      final sceneId = shot.sceneId;
+      shotsByScene[sceneId] = (shotsByScene[sceneId] ?? 0) + 1;
+    }
+
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              itemCount: orderedScenes.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final scene = orderedScenes[index];
+                final count = shotsByScene[scene.id] ?? 0;
+                final number = scene.displayNumber(index + 1);
+                final label = scene.name.trim().isEmpty
+                    ? '$number场'
+                    : '$number场  ${scene.name.trim()}';
+                final isEmpty = count == 0;
+                return MenuAnchor(
+                  builder: (context, controller, child) {
+                    final isActive = activeSceneId == scene.id;
+                    return OutlinedButton(
+                      onPressed: () => onSelectScene(scene.id),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        backgroundColor: isActive
+                            ? Theme.of(context).colorScheme.primaryContainer
+                            : null,
+                      ),
+                      child: GestureDetector(
+                        onSecondaryTap: () {
+                          controller.isOpen ? controller.close() : controller.open();
+                        },
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(label),
+                            const SizedBox(width: 6),
+                            Text(
+                              '$count',
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_drop_down_rounded, size: 16),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                  menuChildren: [
+                    MenuItemButton(
+                      onPressed: () => onRenameScene(scene),
+                      leadingIcon: const Icon(Icons.edit_outlined),
+                      child: const Text('重命名场'),
+                    ),
+                    MenuItemButton(
+                      onPressed: () => onToggleNumberMode(
+                        scene,
+                        scene.numberMode != StoryboardSceneNumberMode.manual,
+                      ),
+                      leadingIcon: const Icon(Icons.tag_outlined),
+                      child: Text(
+                        scene.numberMode == StoryboardSceneNumberMode.manual
+                            ? '恢复自动场号'
+                            : '切换为手动场号',
+                      ),
+                    ),
+                    MenuItemButton(
+                      onPressed: () => onEditManualNumber(scene),
+                      leadingIcon: const Icon(Icons.pin_outlined),
+                      child: const Text('设置手动场号'),
+                    ),
+                    MenuItemButton(
+                      onPressed: isEmpty ? () => onDeleteScene(scene) : null,
+                      leadingIcon: const Icon(Icons.delete_outline_rounded),
+                      child: Text(isEmpty ? '删除空场' : '仅空场可删除'),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: onCreateScene,
+            icon: const Icon(Icons.view_agenda_outlined, size: 16),
+            label: const Text('新建场'),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: const Size(0, 30),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

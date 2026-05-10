@@ -19,6 +19,7 @@ class Shots extends Table {
   TextColumn get id => text()();
   TextColumn get projectId => text()();
   IntColumn get orderIndex => integer()();
+  TextColumn get sceneId => text().withDefault(const Constant('default-scene'))();
   TextColumn get shotNo => text()();
   TextColumn get shotSize => text()();
   IntColumn get durationSec => integer()();
@@ -31,6 +32,20 @@ class Shots extends Table {
   TextColumn get cameraMove => text().withDefault(const Constant(''))();
   TextColumn get cameraRig => text().withDefault(const Constant(''))();
   TextColumn get focalLength => text().withDefault(const Constant(''))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class StoryboardScenes extends Table {
+  TextColumn get id => text()();
+  TextColumn get projectId => text()();
+  IntColumn get sortIndex => integer()();
+  TextColumn get numberMode => text().withDefault(const Constant('auto'))();
+  TextColumn get manualNumber => text().withDefault(const Constant(''))();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -148,6 +163,7 @@ class EventLog extends Table {
     Projects,
     Shots,
     ShotAssets,
+    StoryboardScenes,
     CustomColumns,
     ShotCustomValues,
     PlanSections,
@@ -162,7 +178,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(File file) : super(NativeDatabase(file));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -199,6 +215,33 @@ class AppDatabase extends _$AppDatabase {
             await customStatement(
               "UPDATE custom_columns SET custom_options_json = '[]' WHERE custom_options_json IS NULL OR custom_options_json = ''",
             );
+          }
+          if (from < 4) {
+            await migrator.createTable(storyboardScenes);
+            await migrator.addColumn(shots, shots.sceneId);
+            await customStatement("""
+              INSERT INTO storyboard_scenes (
+                id, project_id, sort_index, number_mode, manual_number, name, created_at, updated_at
+              )
+              SELECT
+                'default-scene',
+                p.id,
+                0,
+                'auto',
+                '',
+                '',
+                p.created_at,
+                p.updated_at
+              FROM projects p
+              WHERE NOT EXISTS (
+                SELECT 1 FROM storyboard_scenes s WHERE s.project_id = p.id
+              )
+            """);
+            await customStatement("""
+              UPDATE shots
+              SET scene_id = 'default-scene'
+              WHERE scene_id IS NULL OR scene_id = ''
+            """);
           }
         },
       );

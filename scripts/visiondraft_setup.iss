@@ -1,5 +1,5 @@
 #define MyAppName "VisionDraft"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "Oscar9527"
 #define MyAppURL "https://github.com/Oscar9527/VisionDraft"
 #define MyAppExeName "vision_draft.exe"
@@ -21,9 +21,9 @@ DisableProgramGroupPage=yes
 LicenseFile=
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputDir=E:\visiondraft\dist
-OutputBaseFilename=VisionDraft-Setup-v0.1.0
-SetupIconFile=E:\visiondraft\windows\runner\resources\app_icon.ico
+OutputDir={#SourcePath}\..\dist
+OutputBaseFilename=VisionDraft-Setup-v0.2.0
+SetupIconFile={#SourcePath}\..\windows\runner\resources\app_icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -39,7 +39,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "E:\visiondraft\dist\windows\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\..\dist\windows\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocKey}"; ValueData: ""; Flags: uninsdeletevalue

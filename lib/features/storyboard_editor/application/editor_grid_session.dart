@@ -120,7 +120,7 @@ class EditorGridSessionController
     state = state.copyWith(focusedCell: cell);
   }
 
-  void reorderField({
+  List<String>? reorderField({
     required String draggedFieldKey,
     required String targetFieldKey,
     required bool placeAfter,
@@ -134,7 +134,7 @@ class EditorGridSessionController
     final fromIndex = order.indexOf(draggedFieldKey);
     final targetIndex = order.indexOf(targetFieldKey);
     if (fromIndex == -1 || targetIndex == -1 || fromIndex == targetIndex) {
-      return;
+      return null;
     }
 
     final item = order.removeAt(fromIndex);
@@ -148,6 +148,7 @@ class EditorGridSessionController
     insertIndex = insertIndex.clamp(0, order.length);
     order.insert(insertIndex, item);
     state = state.copyWith(effectiveFieldOrderKeys: order);
+    return order;
   }
 
   void moveFieldByOffset({

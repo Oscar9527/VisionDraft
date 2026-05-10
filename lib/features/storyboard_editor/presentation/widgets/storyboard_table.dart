@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
@@ -74,8 +74,6 @@ class StoryboardTable extends StatefulWidget {
     required this.onDeleteRow,
     required this.onAddColumn,
     required this.onHideColumn,
-    required this.onMoveColumnLeft,
-    required this.onMoveColumnRight,
     required this.onReorderField,
     required this.onRenameColumn,
     required this.onDeleteColumn,
@@ -109,8 +107,6 @@ class StoryboardTable extends StatefulWidget {
   final DeleteRowRequested onDeleteRow;
   final AddColumnRequested onAddColumn;
   final ColumnActionRequested onHideColumn;
-  final ColumnActionRequested onMoveColumnLeft;
-  final ColumnActionRequested onMoveColumnRight;
   final ReorderFieldRequested onReorderField;
   final Future<void> Function(String columnId) onRenameColumn;
   final Future<void> Function(String columnId) onDeleteColumn;
@@ -456,10 +452,6 @@ class _StoryboardTableState extends State<StoryboardTable> {
     switch (action) {
       case _ColumnAction.hide:
         await widget.onHideColumn(fieldKey);
-      case _ColumnAction.moveLeft:
-        await widget.onMoveColumnLeft(fieldKey);
-      case _ColumnAction.moveRight:
-        await widget.onMoveColumnRight(fieldKey);
       case _ColumnAction.rename:
         final custom = _findCustomColumn(fieldKey);
         if (custom != null) {
@@ -907,7 +899,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
   }
 }
 
-enum _ColumnAction { hide, moveLeft, moveRight, rename, delete }
+enum _ColumnAction { hide, rename, delete }
 
 enum _RowAction { insertAbove, insertBelow, deleteRow }
 
@@ -1200,14 +1192,6 @@ class _HeaderCellState extends State<_HeaderCell> {
                     value: _ColumnAction.hide,
                     child: SizedBox(width: 140, child: Text('隐藏此列')),
                   ),
-                const PopupMenuItem(
-                  value: _ColumnAction.moveLeft,
-                  child: SizedBox(width: 140, child: Text('左移')),
-                ),
-                const PopupMenuItem(
-                  value: _ColumnAction.moveRight,
-                  child: SizedBox(width: 140, child: Text('右移')),
-                ),
                 if (widget.customColumn != null)
                   const PopupMenuItem(
                     value: _ColumnAction.rename,
@@ -2111,3 +2095,5 @@ const _defaultRowHeight = 108.0;
 const _minimumRowHeight = 84.0;
 const _maximumRowHeight = 280.0;
 const _customOptionSentinel = '__custom_option__';
+
+

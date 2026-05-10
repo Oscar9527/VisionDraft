@@ -12,9 +12,12 @@ import '../../features/project_workspace/domain/models/board_preset.dart';
 import '../../features/project_workspace/domain/models/export_payload.dart';
 import '../../features/project_workspace/domain/models/shot_fields.dart';
 import '../../features/project_workspace/domain/models/shot_record.dart';
+import '../../features/project_workspace/domain/models/storyboard_scene.dart';
 
 class PdfExportService {
   const PdfExportService();
+
+  static const double _shotSheetSceneHeaderHeight = 22;
 
   static const String _defaultLogoPngBase64 =
       'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAHiSURBVFhH3dY9TgJBFAfw9RsMtVFvYKMiFmrCEdRGAyz4AcVeQE2Ml7CwEAW8BELQEhOREEvvYdwgWI3vDTOb2d3ZhZgZCl/yL2d//4HwFkPVnLT71vFbn2COhOQgWZ5Wn5itvsWOqBvEIRQfUkAfPkIB9fipgA8poAeHOHhIAfV4vv1DcVkBEYfowSE+XFJALz7k49eHj3B7/XjI7cePCwX0f+djxQFzfmoy+P/i8HDXepVFhhfebQO2XgIDq3eQ1iDwBqTJDLLCjvgHHh6KM9iH5ztdxIu49zHs5cNfvzQAY7qQJDvmH0CkBQTYhxvkNRD3FAjH+QDo/LGQxIWbL8E3/xPOByGOsu3mWzLb1U9jv9lTj/NBMAjfqX0ZiafvWwjZa/bU43xYCRcef6R4EfENFlpCNS6bwgehOIcxcZZdKKEV33q2DQCluFhCC44DYDII5lmr22TzpnPNjqgfQCwvillvAF6zyeJVg0RyDxj3rlA5ALpKcHzpsk6iZoUWmMtWMHpLIMzx5YtHEju4I/OpEolACVaAzJoaSwBurSJ+ViWxw3sSzZRF2MmMzhIL51WLo14cYCfTmbK+EoDSEp5bizjNVFpjCUCtIJjhNJPpkr4SgFpenMMMp5lIiSUM4xfhImnqhjb4gAAAAABJRU5ErkJggg==';
@@ -107,8 +110,8 @@ class PdfExportService {
       columnWidths: baseColumnWidths,
       rowHeights: baseRowHeights,
     );
-    final shotPages = _paginateShotSheetRows(
-      shots: payload.shots,
+    final shotPages = _paginateShotSheetSceneRows(
+      payload: payload,
       rowHeights: layout.rowHeights,
       headerRowHeight: layout.headerRowHeight,
       pageBodyHeight: layout.tableBodyHeight,
@@ -125,7 +128,19 @@ class PdfExportService {
         ),
       ];
 
-      for (final shot in pageShots) {
+      for (final row in pageShots) {
+        if (row is _ScenePageHeaderRow) {
+          tableRows.add(
+            _sceneHeaderTableRow(
+              row.label,
+              columnCount: visibleFields.length,
+              rowHeight: _shotSheetSceneHeaderHeight,
+              fontSize: layout.bodyFontSize,
+            ),
+          );
+          continue;
+        }
+        final shot = (row as _ScenePageShotRow).shot;
         tableRows.add(
           await _shotSheetRow(
             shot: shot,
@@ -909,9 +924,10 @@ class PdfExportService {
     required Map<String, double> rowHeights,
   }) {
     final pageFormat = PdfPageFormat.a4.landscape;
-    const margin = pw.EdgeInsets.fromLTRB(14, 14, 14, 14);
-    const headerSpacing = 8.0;
+    const margin = pw.EdgeInsets.fromLTRB(10, 10, 10, 10);
+    const headerSpacing = 6.0;
     final hasImage = visibleFields.any((fieldKey) => _isImageField(payload, fieldKey));
+    final isDenseTextMode = !hasImage;
     final editorScale = _editorScale(payload);
     final editorFontBias = math.pow(editorScale, 0.12).toDouble();
     final boardTextBias =
@@ -936,16 +952,16 @@ class PdfExportService {
       },
     );
     final densityScale = _clampDouble(
-      math.pow(widthFitScale, hasImage ? 0.28 : 0.16).toDouble(),
-      hasImage ? 0.82 : 0.88,
+      math.pow(widthFitScale, hasImage ? 0.28 : 0.14).toDouble(),
+      hasImage ? 0.82 : 0.84,
       1.0,
     );
     final scaledRowHeights = {
       for (final shot in payload.shots)
         shot.id: _clampDouble(
           math.max(1.0, rowHeights[shot.id] ?? 1.0) * densityScale,
-          hasImage ? 58.0 : 36.0,
-          hasImage ? 132.0 : 92.0,
+          hasImage ? 56.0 : 28.0,
+          hasImage ? 132.0 : 68.0,
         ),
     };
     final tableWidth = visibleFields.fold<double>(
@@ -953,7 +969,7 @@ class PdfExportService {
       (sum, fieldKey) => sum + (normalizedColumnWidths[fieldKey] ?? 0),
     );
     final averageRowHeight = scaledRowHeights.isEmpty
-        ? (hasImage ? 76.0 : 52.0)
+        ? (hasImage ? 76.0 : 42.0)
         : scaledRowHeights.values.fold<double>(0, (sum, value) => sum + value) /
             scaledRowHeights.length;
     final widthFontBias = _clampDouble(
@@ -962,27 +978,27 @@ class PdfExportService {
       1.0,
     );
     final bodyFontSize = _clampDouble(
-      (hasImage ? 9.0 : 9.4) * widthFontBias * editorFontBias * boardTextBias,
-      7.4,
-      10.6,
+      (hasImage ? 9.0 : 8.5) * widthFontBias * editorFontBias * boardTextBias,
+      isDenseTextMode ? 6.6 : 7.4,
+      hasImage ? 10.6 : 9.4,
     );
     final headerFontSize = _clampDouble(bodyFontSize + 0.8, 8.0, 11.6);
     final headerRowHeight = _clampDouble(
       bodyFontSize * 2.08,
       22.0,
-      hasImage ? 30.0 : 28.0,
+      hasImage ? 30.0 : 24.0,
     );
     final maxTextLines = math.max(
       2,
       math.min(
-        hasImage ? 5 : 6,
+        hasImage ? 5 : 7,
         ((averageRowHeight - 8) / (bodyFontSize * 1.24)).floor(),
       ),
     );
     final imagePadding = _clampDouble(
       averageRowHeight * 0.03,
-      2.0,
-      4.6,
+      isDenseTextMode ? 1.2 : 2.0,
+      isDenseTextMode ? 2.8 : 4.6,
     );
     final headerScale = _clampDouble(
       bodyFontSize / 8.9,
@@ -995,9 +1011,9 @@ class PdfExportService {
         payload.branding.brandName.trim().isNotEmpty ||
         payload.branding.tagline.trim().isNotEmpty;
     final estimatedHeaderHeight = _clampDouble(
-      (hasBrandBlock ? 58.0 : 48.0) * headerScale,
-      46.0,
-      76.0,
+      (hasBrandBlock ? 44.0 : 32.0) * headerScale,
+      28.0,
+      60.0,
     );
     final tableBodyHeight = math.max(
       120.0,
@@ -1020,6 +1036,36 @@ class PdfExportService {
       tableWidth: tableWidth,
       columnWidths: normalizedColumnWidths,
       rowHeights: scaledRowHeights,
+    );
+  }
+
+  pw.TableRow _sceneHeaderTableRow(
+    String label, {
+    required int columnCount,
+    required double rowHeight,
+    required double fontSize,
+  }) {
+    return pw.TableRow(
+      decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+      children: [
+        pw.Container(
+          height: rowHeight,
+          alignment: pw.Alignment.centerLeft,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: math.max(fontSize, 8.2),
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+        for (var index = 1; index < columnCount; index++)
+          pw.Container(
+            height: rowHeight,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          ),
+      ],
     );
   }
 
@@ -1117,34 +1163,54 @@ class PdfExportService {
     }.toDouble();
   }
 
-  List<List<ShotRecord>> _paginateShotSheetRows({
-    required List<ShotRecord> shots,
+  List<List<_ScenePageRow>> _paginateShotSheetSceneRows({
+    required ExportPayload payload,
     required Map<String, double> rowHeights,
     required double headerRowHeight,
     required double pageBodyHeight,
   }) {
-    if (shots.isEmpty) {
-      return const [<ShotRecord>[]];
+    if (payload.shots.isEmpty) {
+      return const [<_ScenePageRow>[]];
     }
 
     final bodyLimit = math.max(96.0, pageBodyHeight - headerRowHeight);
-    final pages = <List<ShotRecord>>[];
-    var currentPage = <ShotRecord>[];
+    final pages = <List<_ScenePageRow>>[];
+    var currentPage = <_ScenePageRow>[];
     var currentHeight = 0.0;
 
-    for (final shot in shots) {
-      final shotHeight = rowHeights[shot.id] ?? 0;
-      final wouldOverflow =
-          currentPage.isNotEmpty && currentHeight + shotHeight > bodyLimit;
-
-      if (wouldOverflow) {
-        pages.add(currentPage);
-        currentPage = <ShotRecord>[];
-        currentHeight = 0.0;
+    final groups = _buildSceneShotGroups(payload);
+    for (final group in groups) {
+      if (group.showHeader) {
+        final wouldOverflow =
+            currentPage.isNotEmpty &&
+            currentHeight + _shotSheetSceneHeaderHeight > bodyLimit;
+        if (wouldOverflow) {
+          pages.add(currentPage);
+          currentPage = <_ScenePageRow>[];
+          currentHeight = 0.0;
+        }
+        currentPage.add(_ScenePageHeaderRow(group.headerLabel));
+        currentHeight += _shotSheetSceneHeaderHeight;
       }
 
-      currentPage.add(shot);
-      currentHeight += shotHeight;
+      for (final shot in group.shots) {
+        final shotHeight = rowHeights[shot.id] ?? 0;
+        final wouldOverflow =
+            currentPage.isNotEmpty && currentHeight + shotHeight > bodyLimit;
+
+        if (wouldOverflow) {
+          pages.add(currentPage);
+          currentPage = <_ScenePageRow>[];
+          currentHeight = 0.0;
+          if (group.showHeader) {
+            currentPage.add(_ScenePageHeaderRow(group.headerLabel));
+            currentHeight += _shotSheetSceneHeaderHeight;
+          }
+        }
+
+        currentPage.add(_ScenePageShotRow(shot));
+        currentHeight += shotHeight;
+      }
     }
 
     if (currentPage.isNotEmpty) {
@@ -1152,6 +1218,38 @@ class PdfExportService {
     }
 
     return pages;
+  }
+
+  List<_SceneShotGroup> _buildSceneShotGroups(ExportPayload payload) {
+    final scenes = [...payload.scenes]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    if (scenes.isEmpty) {
+      return [
+        _SceneShotGroup(
+          showHeader: false,
+          headerLabel: '',
+          shots: payload.shots,
+        ),
+      ];
+    }
+    final shotsByScene = <String, List<ShotRecord>>{};
+    for (final shot in payload.shots) {
+      shotsByScene.putIfAbsent(shot.sceneId, () => <ShotRecord>[]).add(shot);
+    }
+    final hideSingleDefaultScene =
+        scenes.length == 1 &&
+        scenes.first.name.trim().isEmpty &&
+        scenes.first.numberMode == StoryboardSceneNumberMode.auto;
+    return [
+      for (var index = 0; index < scenes.length; index++)
+        _SceneShotGroup(
+          showHeader: !hideSingleDefaultScene,
+          headerLabel: scenes[index].name.trim().isEmpty
+              ? '${scenes[index].displayNumber(index + 1)}场'
+              : '${scenes[index].displayNumber(index + 1)}场  ${scenes[index].name.trim()}',
+          shots: [...(shotsByScene[scenes[index].id] ?? const <ShotRecord>[])]
+            ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex)),
+        ),
+    ];
   }
 
   double _editorScale(ExportPayload payload) {
@@ -1193,6 +1291,34 @@ class _ShotSheetLayout {
   final double tableWidth;
   final Map<String, double> columnWidths;
   final Map<String, double> rowHeights;
+}
+
+sealed class _ScenePageRow {
+  const _ScenePageRow();
+}
+
+class _ScenePageHeaderRow extends _ScenePageRow {
+  const _ScenePageHeaderRow(this.label);
+
+  final String label;
+}
+
+class _ScenePageShotRow extends _ScenePageRow {
+  const _ScenePageShotRow(this.shot);
+
+  final ShotRecord shot;
+}
+
+class _SceneShotGroup {
+  const _SceneShotGroup({
+    required this.showHeader,
+    required this.headerLabel,
+    required this.shots,
+  });
+
+  final bool showHeader;
+  final String headerLabel;
+  final List<ShotRecord> shots;
 }
 
 double _clampDouble(double value, double min, double max) {

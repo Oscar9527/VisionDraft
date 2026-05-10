@@ -4,6 +4,7 @@ class ShotRecord {
   const ShotRecord({
     required this.id,
     required this.orderIndex,
+    required this.sceneId,
     required this.shotNo,
     required this.shotSize,
     required this.durationSec,
@@ -23,6 +24,7 @@ class ShotRecord {
 
   final String id;
   final int orderIndex;
+  final String sceneId;
   final String shotNo;
   final String shotSize;
   final int durationSec;
@@ -42,6 +44,7 @@ class ShotRecord {
   ShotRecord copyWith({
     String? id,
     int? orderIndex,
+    String? sceneId,
     String? shotNo,
     String? shotSize,
     int? durationSec,
@@ -63,6 +66,7 @@ class ShotRecord {
     return ShotRecord(
       id: id ?? this.id,
       orderIndex: orderIndex ?? this.orderIndex,
+      sceneId: sceneId ?? this.sceneId,
       shotNo: shotNo ?? this.shotNo,
       shotSize: shotSize ?? this.shotSize,
       durationSec: durationSec ?? this.durationSec,

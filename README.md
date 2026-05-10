@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">English</a> ·
-  <a href="./README.zh-CN.md">简体中文</a> ·
+  <a href="./README.md">English</a> |
+  <a href="./README.zh-CN.md">简体中文</a> |
   <a href="https://github.com/Oscar9527/VisionDraft/releases">Releases</a>
 </p>
 
@@ -27,15 +27,14 @@ VisionDraft is a local-first desktop application for film pre-production. It is 
 
 The current public deliverable is the **Windows desktop version**.
 
-## Why VisionDraft
+## Features
 
-Traditional storyboard workflows are often split between paper notes, image folders, and spreadsheets. VisionDraft consolidates that process into a structured desktop workspace so creators can:
-
-- build and edit shot lists
-- preview shots visually
-- regroup shots into shooting plans
-- export printable production documents
-- keep all project data available offline
+- Storyboard editor with fixed fields, custom columns, inline editing, image fields, and column templates
+- Storyboard board with shared display presets and thumbnail-first browsing
+- Shooting plan organization with section-based scheduling
+- Export for shot sheets, shooting plans, call sheets, Excel, PDF preview, and Windows print
+- Script-to-storyboard AI draft workflow with local provider settings
+- Local-first `.vdraft` project bundles backed by SQLite
 
 ## Current Scope
 
@@ -45,44 +44,9 @@ This repository currently documents and ships:
 - local project bundle workflow
 - shot editing and storyboard browsing
 - shooting plan organization
-- PDF export and Windows print flow
+- PDF / Excel export and Windows print flow
 
-This repository does **not** publicly promise unfinished platform deliverables.
-
-## Features
-
-### Storyboard Editor
-
-- table-based shot entry
-- fixed field editing
-- custom columns
-- column visibility and ordering
-- project-level column templates
-
-### Storyboard Board
-
-- card-based browsing
-- shared display presets
-- thumbnail-first rendering
-
-### Shooting Plan
-
-- section-based organization
-- unassigned shot pool
-- shot-to-section assignment workflow
-
-### Export
-
-- shot sheet export
-- shooting plan export
-- call sheet export
-- Windows print support
-
-### Local-First Storage
-
-- projects stored as `.vdraft` folders
-- offline-first workflow
-- local SQLite persistence
+This repository does **not** publicly promise unfinished Android delivery.
 
 ## Quick Start
 
@@ -122,6 +86,12 @@ Entry executable:
 dist/windows/vision_draft.exe
 ```
 
+Installer script:
+
+```text
+scripts/visiondraft_setup.iss
+```
+
 ## Project Bundle Format
 
 Each project is stored as an isolated `.vdraft` directory:
@@ -144,6 +114,7 @@ lib/
 ├─ app/
 ├─ core/
 ├─ features/
+│  ├─ ai_storyboard/
 │  ├─ project_library/
 │  ├─ project_workspace/
 │  ├─ storyboard_editor/
@@ -158,7 +129,7 @@ lib/
    └─ sync_stub/
 ```
 
-## Development Notes
+## Validation
 
 Recommended validation before submitting changes:
 
@@ -170,12 +141,6 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1
 
 Generated directories such as `dist/`, `build/`, `.dart_tool/`, `tmp_build/`, and `tmp_run_logs/` should not be committed.
 
-To export a clean source archive:
-
-```powershell
-git archive --format=zip --output VisionDraft-source.zip HEAD
-```
-
 ## Roadmap
 
 Near-term priorities:
@@ -184,10 +149,6 @@ Near-term priorities:
 - improve export polish and print predictability
 - harden data editing and recovery flows
 - expand performance validation for larger storyboard projects
-
-## Contributing
-
-This repository is under active iteration. Keep contributions focused, incremental, and aligned with the existing local-first desktop architecture.
 
 ## License
 

@@ -171,6 +171,8 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       shots: snapshot.shots,
       columnPreset: snapshot.columnPreset,
       effectiveFieldOrderKeys: gridSession.effectiveFieldOrderKeys,
+      scenes: snapshot.scenes,
+      storyboardRows: snapshot.storyboardRows,
       editorScalePercent: gridSession.zoomPercent,
       effectiveColumnWidths: gridSession.columnWidthsByFieldKey,
       effectiveRowHeights: gridSession.rowHeightsByShotId,

@@ -4,6 +4,8 @@ import 'column_preset.dart';
 import 'plan_board.dart';
 import 'project_bundle.dart';
 import 'shot_record.dart';
+import 'storyboard_row.dart';
+import 'storyboard_scene.dart';
 
 enum ExportDocumentType { shotSheet, shootingPlan, callSheet }
 
@@ -27,6 +29,8 @@ class ExportPayload {
     required this.shots,
     required this.columnPreset,
     required this.effectiveFieldOrderKeys,
+    this.scenes = const <StoryboardScene>[],
+    this.storyboardRows = const <StoryboardRow>[],
     this.editorScalePercent = 100,
     this.effectiveColumnWidths = const <String, double>{},
     this.effectiveRowHeights = const <String, double>{},
@@ -42,6 +46,8 @@ class ExportPayload {
   final List<ShotRecord> shots;
   final ColumnPreset columnPreset;
   final List<String> effectiveFieldOrderKeys;
+  final List<StoryboardScene> scenes;
+  final List<StoryboardRow> storyboardRows;
   final double editorScalePercent;
   final Map<String, double> effectiveColumnWidths;
   final Map<String, double> effectiveRowHeights;

@@ -15,6 +15,7 @@ import '../domain/models/column_preset.dart';
 import '../domain/models/custom_column_definition.dart';
 import '../domain/models/plan_board.dart';
 import '../domain/models/shot_record.dart';
+import '../domain/models/storyboard_scene.dart';
 import '../domain/repositories/project_workspace_repository.dart';
 
 class ProjectWorkspaceCommandService {
@@ -60,12 +61,17 @@ class ProjectWorkspaceCommandService {
     commandBus.register<UnassignShotFromPlanCommand>(
       _handleUnassignShotFromPlan,
     );
+    commandBus.register<CreateSceneCommand>(_handleCreateScene);
+    commandBus.register<UpdateSceneCommand>(_handleUpdateScene);
+    commandBus.register<DeleteEmptySceneCommand>(_handleDeleteEmptyScene);
+    commandBus.register<ReorderScenesCommand>(_handleReorderScenes);
   }
 
   Future<ShotRecord> createShot(
     String projectId, {
     ShotRecord? seedShot,
     int? insertIndex,
+    String? sceneId,
   }) async {
     final effectiveSeedShot = seedShot == null
         ? null
@@ -77,6 +83,7 @@ class ProjectWorkspaceCommandService {
         projectId: projectId,
         seedShot: effectiveSeedShot,
         insertIndex: insertIndex,
+        sceneId: sceneId,
       ),
     );
     return result.payload! as ShotRecord;
@@ -443,6 +450,47 @@ class ProjectWorkspaceCommandService {
     );
   }
 
+  Future<void> createScene({
+    required String projectId,
+    required int insertIndex,
+    String name = '',
+  }) async {
+    await commandBus.dispatch(
+      CreateSceneCommand(
+        projectId: projectId,
+        insertIndex: insertIndex,
+        name: name,
+      ),
+    );
+  }
+
+  Future<void> updateScene({
+    required String projectId,
+    required StoryboardScene scene,
+  }) async {
+    await commandBus.dispatch(
+      UpdateSceneCommand(projectId: projectId, scene: scene),
+    );
+  }
+
+  Future<void> deleteEmptyScene({
+    required String projectId,
+    required String sceneId,
+  }) async {
+    await commandBus.dispatch(
+      DeleteEmptySceneCommand(projectId: projectId, sceneId: sceneId),
+    );
+  }
+
+  Future<void> reorderScenes({
+    required String projectId,
+    required List<String> orderedSceneIds,
+  }) async {
+    await commandBus.dispatch(
+      ReorderScenesCommand(projectId: projectId, orderedSceneIds: orderedSceneIds),
+    );
+  }
+
   Future<void> undo(String projectId) async {
     await historyManager.undo();
   }
@@ -456,6 +504,7 @@ class ProjectWorkspaceCommandService {
       command.projectId,
       seedShot: command.seedShot,
       insertIndex: command.insertIndex,
+      sceneId: command.sceneId,
     );
     final seed = created.copyWith();
     return CommandResult(
@@ -1378,6 +1427,91 @@ class ProjectWorkspaceCommandService {
         ),
         redo: () =>
             workspaceRepository.unassignShot(command.projectId, command.shotId),
+      ),
+    );
+  }
+
+  Future<CommandResult> _handleCreateScene(CreateSceneCommand command) async {
+    final scene = await workspaceRepository.createScene(
+      projectId: command.projectId,
+      insertIndex: command.insertIndex,
+      name: command.name,
+      numberMode: command.numberMode,
+      manualNumber: command.manualNumber,
+    );
+    return CommandResult(
+      payload: scene,
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () => workspaceRepository.deleteScene(command.projectId, scene.id),
+        redo: () => workspaceRepository.createScene(
+          projectId: command.projectId,
+          insertIndex: scene.sortIndex,
+          sceneId: scene.id,
+          name: scene.name,
+          numberMode: scene.numberMode,
+          manualNumber: scene.manualNumber,
+        ),
+      ),
+    );
+  }
+
+  Future<CommandResult> _handleUpdateScene(UpdateSceneCommand command) async {
+    final scenes = await workspaceRepository.loadScenes(command.projectId);
+    final previous = scenes.firstWhere((item) => item.id == command.scene.id);
+    await workspaceRepository.updateScene(command.projectId, command.scene);
+    return CommandResult(
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () => workspaceRepository.updateScene(command.projectId, previous),
+        redo: () =>
+            workspaceRepository.updateScene(command.projectId, command.scene),
+      ),
+    );
+  }
+
+  Future<CommandResult> _handleDeleteEmptyScene(
+    DeleteEmptySceneCommand command,
+  ) async {
+    final scenes = await workspaceRepository.loadScenes(command.projectId);
+    final previous = scenes.firstWhere((item) => item.id == command.sceneId);
+    await workspaceRepository.deleteScene(command.projectId, command.sceneId);
+    return CommandResult(
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () => workspaceRepository.createScene(
+          projectId: command.projectId,
+          insertIndex: previous.sortIndex,
+          sceneId: previous.id,
+          name: previous.name,
+          numberMode: previous.numberMode,
+          manualNumber: previous.manualNumber,
+        ),
+        redo: () =>
+            workspaceRepository.deleteScene(command.projectId, command.sceneId),
+      ),
+    );
+  }
+
+  Future<CommandResult> _handleReorderScenes(ReorderScenesCommand command) async {
+    final scenes = await workspaceRepository.loadScenes(command.projectId);
+    final previous = scenes.map((item) => item.id).toList();
+    await workspaceRepository.reorderScenes(
+      command.projectId,
+      command.orderedSceneIds,
+    );
+    return CommandResult(
+      historyEntry: HistoryEntry(
+        label: command.label,
+        createdAt: DateTime.now(),
+        undo: () => workspaceRepository.reorderScenes(command.projectId, previous),
+        redo: () => workspaceRepository.reorderScenes(
+          command.projectId,
+          command.orderedSceneIds,
+        ),
       ),
     );
   }

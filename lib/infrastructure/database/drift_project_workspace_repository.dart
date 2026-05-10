@@ -22,12 +22,14 @@ import '../../features/project_workspace/domain/models/plan_board.dart'
 import '../../features/project_workspace/domain/models/project_bundle.dart';
 import '../../features/project_workspace/domain/models/shot_fields.dart';
 import '../../features/project_workspace/domain/models/shot_record.dart';
+import '../../features/project_workspace/domain/models/storyboard_scene.dart';
 import '../../features/project_workspace/domain/repositories/project_workspace_repository.dart';
 import '../filesystem/project_bundle_service.dart';
 import 'app_database.dart' as db;
 import 'app_index_database.dart' as index_db;
 
 const _fixedFieldOptionsEventType = 'fixed_field_custom_options';
+const _defaultSceneId = 'default-scene';
 
 class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   DriftProjectWorkspaceRepository({
@@ -116,6 +118,21 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
             );
 
         await database
+            .into(database.storyboardScenes)
+            .insert(
+              db.StoryboardScenesCompanion.insert(
+                id: _defaultSceneId,
+                projectId: bundle.id,
+                sortIndex: 0,
+                numberMode: const Value('auto'),
+                manualNumber: const Value(''),
+                name: const Value(''),
+                createdAt: bundle.createdAt,
+                updatedAt: bundle.updatedAt,
+              ),
+            );
+
+        await database
             .into(database.planSections)
             .insert(
               db.PlanSectionsCompanion.insert(
@@ -134,6 +151,7 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
                   id: _uuid.v4(),
                   projectId: bundle.id,
                   orderIndex: index,
+                  sceneId: Value(_defaultSceneId),
                   shotNo: '${index + 1}',
                   shotSize: '中景',
                   durationSec: 0,
@@ -354,6 +372,31 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
   }
 
   @override
+  Future<List<StoryboardScene>> loadScenes(String projectId) async {
+    return _withDb(projectId, (database, bundle) async {
+      final rows =
+          await (database.select(database.storyboardScenes)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..orderBy([(tbl) => OrderingTerm.asc(tbl.sortIndex)]))
+              .get();
+      return rows
+          .map(
+            (row) => StoryboardScene(
+              id: row.id,
+              projectId: row.projectId,
+              sortIndex: row.sortIndex,
+              numberMode: StoryboardSceneNumberMode.values.byName(row.numberMode),
+              manualNumber: row.manualNumber,
+              name: row.name,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+            ),
+          )
+          .toList();
+    });
+  }
+
+  @override
   Future<Map<String, Map<String, CustomFieldValue>>>
   loadCustomFieldValuesByShot(String projectId) async {
     return _withDb(projectId, (database, bundle) async {
@@ -473,6 +516,7 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     String projectId, {
     ShotRecord? seedShot,
     int? insertIndex,
+    String? sceneId,
   }) async {
     return _withDb(projectId, (database, bundle) async {
       final shotCount = await _countShots(database, projectId);
@@ -489,11 +533,18 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
         );
       }
 
+      final resolvedSceneId =
+          sceneId ??
+          seedShot?.sceneId ??
+          (await _loadFirstSceneId(database, projectId)) ??
+          _defaultSceneId;
+
       final row =
           seedShot ??
           ShotRecord(
             id: shotId,
             orderIndex: orderIndex,
+            sceneId: resolvedSceneId,
             shotNo: '${shotCount + 1}',
             shotSize: '中景',
             durationSec: 0,
@@ -515,6 +566,7 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
               id: row.id,
               projectId: projectId,
               orderIndex: row.orderIndex,
+              sceneId: Value(row.sceneId),
               shotNo: row.shotNo,
               shotSize: row.shotSize,
               durationSec: row.durationSec,
@@ -1432,6 +1484,179 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     });
   }
 
+  @override
+  Future<StoryboardScene> createScene({
+    required String projectId,
+    required int insertIndex,
+    String? sceneId,
+    String name = '',
+    StoryboardSceneNumberMode numberMode = StoryboardSceneNumberMode.auto,
+    String manualNumber = '',
+  }) async {
+    return _withDb(projectId, (database, bundle) async {
+      final now = DateTime.now();
+      final rows =
+          await (database.select(database.storyboardScenes)
+                ..where((tbl) => tbl.projectId.equals(projectId))
+                ..orderBy([(tbl) => OrderingTerm.asc(tbl.sortIndex)]))
+              .get();
+      final safeIndex = insertIndex.clamp(0, rows.length);
+      for (final row in rows.reversed) {
+        if (row.sortIndex >= safeIndex) {
+          await (database.update(database.storyboardScenes)
+                ..where((tbl) => tbl.id.equals(row.id)))
+              .write(
+                db.StoryboardScenesCompanion(
+                  sortIndex: Value(row.sortIndex + 1),
+                  updatedAt: Value(now),
+                ),
+              );
+        }
+      }
+      final scene = StoryboardScene(
+        id: sceneId ?? _uuid.v4(),
+        projectId: projectId,
+        sortIndex: safeIndex,
+        numberMode: numberMode,
+        manualNumber: manualNumber,
+        name: name,
+        createdAt: now,
+        updatedAt: now,
+      );
+      await database.into(database.storyboardScenes).insert(
+            db.StoryboardScenesCompanion.insert(
+              id: scene.id,
+              projectId: projectId,
+              sortIndex: scene.sortIndex,
+              numberMode: Value(scene.numberMode.name),
+              manualNumber: Value(scene.manualNumber),
+              name: Value(scene.name),
+              createdAt: scene.createdAt,
+              updatedAt: scene.updatedAt,
+            ),
+          );
+      await _touchProject(database, projectId);
+      return scene;
+    });
+  }
+
+  @override
+  Future<void> updateScene(String projectId, StoryboardScene scene) async {
+    await _withDb(projectId, (database, bundle) async {
+      await (database.update(database.storyboardScenes)
+            ..where((tbl) => tbl.id.equals(scene.id)))
+          .write(
+            db.StoryboardScenesCompanion(
+              sortIndex: Value(scene.sortIndex),
+              numberMode: Value(scene.numberMode.name),
+              manualNumber: Value(scene.manualNumber),
+              name: Value(scene.name),
+              updatedAt: Value(scene.updatedAt),
+            ),
+          );
+      await _touchProject(database, projectId);
+    });
+  }
+
+  @override
+  Future<void> deleteScene(String projectId, String sceneId) async {
+    await _withDb(projectId, (database, bundle) async {
+      await database.transaction(() async {
+        final shotCountExpression = database.shots.id.count();
+        final shotCount = await (database.selectOnly(database.shots)
+              ..addColumns([shotCountExpression])
+              ..where(database.shots.sceneId.equals(sceneId)))
+            .map((row) => row.read(shotCountExpression) ?? 0)
+            .getSingle();
+        if (shotCount > 0) {
+          throw StateError('Cannot delete non-empty scene.');
+        }
+        await (database.delete(
+          database.storyboardScenes,
+        )..where((tbl) => tbl.id.equals(sceneId))).go();
+        final rows =
+            await (database.select(database.storyboardScenes)
+                  ..where((tbl) => tbl.projectId.equals(projectId))
+                  ..orderBy([(tbl) => OrderingTerm.asc(tbl.sortIndex)]))
+                .get();
+        for (var index = 0; index < rows.length; index++) {
+          if (rows[index].sortIndex != index) {
+            await (database.update(database.storyboardScenes)
+                  ..where((tbl) => tbl.id.equals(rows[index].id)))
+                .write(
+                  db.StoryboardScenesCompanion(
+                    sortIndex: Value(index),
+                    updatedAt: Value(DateTime.now()),
+                  ),
+                );
+          }
+        }
+      });
+      await _touchProject(database, projectId);
+    });
+  }
+
+  @override
+  Future<void> reorderScenes(String projectId, List<String> orderedSceneIds) async {
+    await _withDb(projectId, (database, bundle) async {
+      await database.transaction(() async {
+        for (var index = 0; index < orderedSceneIds.length; index++) {
+          await (database.update(database.storyboardScenes)
+                ..where((tbl) => tbl.id.equals(orderedSceneIds[index])))
+              .write(
+                db.StoryboardScenesCompanion(
+                  sortIndex: Value(index),
+                  updatedAt: Value(DateTime.now()),
+                ),
+              );
+        }
+      });
+      await _touchProject(database, projectId);
+    });
+  }
+
+  @override
+  Future<void> applySceneShotStructure({
+    required String projectId,
+    required List<String> orderedSceneIds,
+    required Map<String, List<String>> orderedShotIdsByScene,
+  }) async {
+    await _withDb(projectId, (database, bundle) async {
+      await database.transaction(() async {
+        for (var sceneIndex = 0; sceneIndex < orderedSceneIds.length; sceneIndex++) {
+          final sceneId = orderedSceneIds[sceneIndex];
+          await (database.update(database.storyboardScenes)
+                ..where((tbl) => tbl.id.equals(sceneId)))
+              .write(
+                db.StoryboardScenesCompanion(
+                  sortIndex: Value(sceneIndex),
+                  updatedAt: Value(DateTime.now()),
+                ),
+              );
+
+          final shotIds = orderedShotIdsByScene[sceneId] ?? const <String>[];
+          for (var sceneShotIndex = 0; sceneShotIndex < shotIds.length; sceneShotIndex++) {
+            final globalOrder = _globalOrderForSceneShot(
+              orderedSceneIds: orderedSceneIds,
+              orderedShotIdsByScene: orderedShotIdsByScene,
+              sceneId: sceneId,
+              localIndex: sceneShotIndex,
+            );
+            await (database.update(database.shots)
+                  ..where((tbl) => tbl.id.equals(shotIds[sceneShotIndex])))
+                .write(
+                  db.ShotsCompanion(
+                    sceneId: Value(sceneId),
+                    orderIndex: Value(globalOrder),
+                  ),
+                );
+          }
+        }
+      });
+      await _touchProject(database, projectId);
+    });
+  }
+
   Future<void> _updateShotRow(
     db.AppDatabase database,
     String shotId,
@@ -1449,6 +1674,19 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
           ..where(database.shots.projectId.equals(projectId)))
         .map((row) => row.read(countExpression) ?? 0)
         .getSingle();
+  }
+
+  Future<String?> _loadFirstSceneId(
+    db.AppDatabase database,
+    String projectId,
+  ) async {
+    final row =
+        await (database.select(database.storyboardScenes)
+              ..where((tbl) => tbl.projectId.equals(projectId))
+              ..orderBy([(tbl) => OrderingTerm.asc(tbl.sortIndex)])
+              ..limit(1))
+            .getSingleOrNull();
+    return row?.id;
   }
 
   Future<int> _nextSectionOrderIndex(
@@ -1502,6 +1740,22 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
             ..where((tbl) => tbl.id.equals(rows[index].id)))
           .write(db.ShotsCompanion(orderIndex: Value(index)));
     }
+  }
+
+  int _globalOrderForSceneShot({
+    required List<String> orderedSceneIds,
+    required Map<String, List<String>> orderedShotIdsByScene,
+    required String sceneId,
+    required int localIndex,
+  }) {
+    var offset = 0;
+    for (final currentSceneId in orderedSceneIds) {
+      if (currentSceneId == sceneId) {
+        return offset + localIndex;
+      }
+      offset += (orderedShotIdsByScene[currentSceneId] ?? const <String>[]).length;
+    }
+    return offset + localIndex;
   }
 
   Future<void> _upsertAsset(
@@ -1660,6 +1914,7 @@ class DriftProjectWorkspaceRepository implements ProjectWorkspaceRepository {
     return ShotRecord(
       id: shot.id,
       orderIndex: shot.orderIndex,
+      sceneId: shot.sceneId,
       shotNo: shot.shotNo,
       shotSize: _normalizeLegacyOption(shot.shotSize),
       durationSec: shot.durationSec,

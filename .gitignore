@@ -33,19 +33,22 @@ migrate_working_dir/
 /build/
 /coverage/
 /dist/
+/releases/
 /tmp_build/
 /tmp_run_logs/
 /tmp_*
 /tmp_*/
 /windows/flutter/ephemeral/
 *.obj
-*.exe
 *.pdb
 *.ilk
 *.tlog
 *.lastbuildstate
 *.vcxproj.user
 *.bat.log
+*.7z
+*.iss.log
+*.zip
 
 # Symbolication related
 app.*.symbols

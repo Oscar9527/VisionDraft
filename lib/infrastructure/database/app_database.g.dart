@@ -346,6 +346,18 @@ class $ShotsTable extends Shots with TableInfo<$ShotsTable, Shot> {
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _sceneIdMeta = const VerificationMeta(
+    'sceneId',
+  );
+  @override
+  late final GeneratedColumn<String> sceneId = GeneratedColumn<String>(
+    'scene_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('default-scene'),
+  );
   static const VerificationMeta _shotNoMeta = const VerificationMeta('shotNo');
   @override
   late final GeneratedColumn<String> shotNo = GeneratedColumn<String>(
@@ -486,6 +498,7 @@ class $ShotsTable extends Shots with TableInfo<$ShotsTable, Shot> {
     id,
     projectId,
     orderIndex,
+    sceneId,
     shotNo,
     shotSize,
     durationSec,
@@ -531,6 +544,12 @@ class $ShotsTable extends Shots with TableInfo<$ShotsTable, Shot> {
       );
     } else if (isInserting) {
       context.missing(_orderIndexMeta);
+    }
+    if (data.containsKey('scene_id')) {
+      context.handle(
+        _sceneIdMeta,
+        sceneId.isAcceptableOrUnknown(data['scene_id']!, _sceneIdMeta),
+      );
     }
     if (data.containsKey('shot_no')) {
       context.handle(
@@ -643,6 +662,10 @@ class $ShotsTable extends Shots with TableInfo<$ShotsTable, Shot> {
         DriftSqlType.int,
         data['${effectivePrefix}order_index'],
       )!,
+      sceneId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}scene_id'],
+      )!,
       shotNo: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}shot_no'],
@@ -704,6 +727,7 @@ class Shot extends DataClass implements Insertable<Shot> {
   final String id;
   final String projectId;
   final int orderIndex;
+  final String sceneId;
   final String shotNo;
   final String shotSize;
   final int durationSec;
@@ -720,6 +744,7 @@ class Shot extends DataClass implements Insertable<Shot> {
     required this.id,
     required this.projectId,
     required this.orderIndex,
+    required this.sceneId,
     required this.shotNo,
     required this.shotSize,
     required this.durationSec,
@@ -739,6 +764,7 @@ class Shot extends DataClass implements Insertable<Shot> {
     map['id'] = Variable<String>(id);
     map['project_id'] = Variable<String>(projectId);
     map['order_index'] = Variable<int>(orderIndex);
+    map['scene_id'] = Variable<String>(sceneId);
     map['shot_no'] = Variable<String>(shotNo);
     map['shot_size'] = Variable<String>(shotSize);
     map['duration_sec'] = Variable<int>(durationSec);
@@ -759,6 +785,7 @@ class Shot extends DataClass implements Insertable<Shot> {
       id: Value(id),
       projectId: Value(projectId),
       orderIndex: Value(orderIndex),
+      sceneId: Value(sceneId),
       shotNo: Value(shotNo),
       shotSize: Value(shotSize),
       durationSec: Value(durationSec),
@@ -783,6 +810,7 @@ class Shot extends DataClass implements Insertable<Shot> {
       id: serializer.fromJson<String>(json['id']),
       projectId: serializer.fromJson<String>(json['projectId']),
       orderIndex: serializer.fromJson<int>(json['orderIndex']),
+      sceneId: serializer.fromJson<String>(json['sceneId']),
       shotNo: serializer.fromJson<String>(json['shotNo']),
       shotSize: serializer.fromJson<String>(json['shotSize']),
       durationSec: serializer.fromJson<int>(json['durationSec']),
@@ -804,6 +832,7 @@ class Shot extends DataClass implements Insertable<Shot> {
       'id': serializer.toJson<String>(id),
       'projectId': serializer.toJson<String>(projectId),
       'orderIndex': serializer.toJson<int>(orderIndex),
+      'sceneId': serializer.toJson<String>(sceneId),
       'shotNo': serializer.toJson<String>(shotNo),
       'shotSize': serializer.toJson<String>(shotSize),
       'durationSec': serializer.toJson<int>(durationSec),
@@ -823,6 +852,7 @@ class Shot extends DataClass implements Insertable<Shot> {
     String? id,
     String? projectId,
     int? orderIndex,
+    String? sceneId,
     String? shotNo,
     String? shotSize,
     int? durationSec,
@@ -839,6 +869,7 @@ class Shot extends DataClass implements Insertable<Shot> {
     id: id ?? this.id,
     projectId: projectId ?? this.projectId,
     orderIndex: orderIndex ?? this.orderIndex,
+    sceneId: sceneId ?? this.sceneId,
     shotNo: shotNo ?? this.shotNo,
     shotSize: shotSize ?? this.shotSize,
     durationSec: durationSec ?? this.durationSec,
@@ -859,6 +890,7 @@ class Shot extends DataClass implements Insertable<Shot> {
       orderIndex: data.orderIndex.present
           ? data.orderIndex.value
           : this.orderIndex,
+      sceneId: data.sceneId.present ? data.sceneId.value : this.sceneId,
       shotNo: data.shotNo.present ? data.shotNo.value : this.shotNo,
       shotSize: data.shotSize.present ? data.shotSize.value : this.shotSize,
       durationSec: data.durationSec.present
@@ -890,6 +922,7 @@ class Shot extends DataClass implements Insertable<Shot> {
           ..write('id: $id, ')
           ..write('projectId: $projectId, ')
           ..write('orderIndex: $orderIndex, ')
+          ..write('sceneId: $sceneId, ')
           ..write('shotNo: $shotNo, ')
           ..write('shotSize: $shotSize, ')
           ..write('durationSec: $durationSec, ')
@@ -911,6 +944,7 @@ class Shot extends DataClass implements Insertable<Shot> {
     id,
     projectId,
     orderIndex,
+    sceneId,
     shotNo,
     shotSize,
     durationSec,
@@ -931,6 +965,7 @@ class Shot extends DataClass implements Insertable<Shot> {
           other.id == this.id &&
           other.projectId == this.projectId &&
           other.orderIndex == this.orderIndex &&
+          other.sceneId == this.sceneId &&
           other.shotNo == this.shotNo &&
           other.shotSize == this.shotSize &&
           other.durationSec == this.durationSec &&
@@ -949,6 +984,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
   final Value<String> id;
   final Value<String> projectId;
   final Value<int> orderIndex;
+  final Value<String> sceneId;
   final Value<String> shotNo;
   final Value<String> shotSize;
   final Value<int> durationSec;
@@ -966,6 +1002,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
     this.id = const Value.absent(),
     this.projectId = const Value.absent(),
     this.orderIndex = const Value.absent(),
+    this.sceneId = const Value.absent(),
     this.shotNo = const Value.absent(),
     this.shotSize = const Value.absent(),
     this.durationSec = const Value.absent(),
@@ -984,6 +1021,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
     required String id,
     required String projectId,
     required int orderIndex,
+    this.sceneId = const Value.absent(),
     required String shotNo,
     required String shotSize,
     required int durationSec,
@@ -1007,6 +1045,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
     Expression<String>? id,
     Expression<String>? projectId,
     Expression<int>? orderIndex,
+    Expression<String>? sceneId,
     Expression<String>? shotNo,
     Expression<String>? shotSize,
     Expression<int>? durationSec,
@@ -1025,6 +1064,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
       if (id != null) 'id': id,
       if (projectId != null) 'project_id': projectId,
       if (orderIndex != null) 'order_index': orderIndex,
+      if (sceneId != null) 'scene_id': sceneId,
       if (shotNo != null) 'shot_no': shotNo,
       if (shotSize != null) 'shot_size': shotSize,
       if (durationSec != null) 'duration_sec': durationSec,
@@ -1045,6 +1085,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
     Value<String>? id,
     Value<String>? projectId,
     Value<int>? orderIndex,
+    Value<String>? sceneId,
     Value<String>? shotNo,
     Value<String>? shotSize,
     Value<int>? durationSec,
@@ -1063,6 +1104,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
       id: id ?? this.id,
       projectId: projectId ?? this.projectId,
       orderIndex: orderIndex ?? this.orderIndex,
+      sceneId: sceneId ?? this.sceneId,
       shotNo: shotNo ?? this.shotNo,
       shotSize: shotSize ?? this.shotSize,
       durationSec: durationSec ?? this.durationSec,
@@ -1090,6 +1132,9 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
     }
     if (orderIndex.present) {
       map['order_index'] = Variable<int>(orderIndex.value);
+    }
+    if (sceneId.present) {
+      map['scene_id'] = Variable<String>(sceneId.value);
     }
     if (shotNo.present) {
       map['shot_no'] = Variable<String>(shotNo.value);
@@ -1139,6 +1184,7 @@ class ShotsCompanion extends UpdateCompanion<Shot> {
           ..write('id: $id, ')
           ..write('projectId: $projectId, ')
           ..write('orderIndex: $orderIndex, ')
+          ..write('sceneId: $sceneId, ')
           ..write('shotNo: $shotNo, ')
           ..write('shotSize: $shotSize, ')
           ..write('durationSec: $durationSec, ')
@@ -1760,6 +1806,517 @@ class ShotAssetsCompanion extends UpdateCompanion<ShotAsset> {
           ..write('width: $width, ')
           ..write('height: $height, ')
           ..write('bytes: $bytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $StoryboardScenesTable extends StoryboardScenes
+    with TableInfo<$StoryboardScenesTable, StoryboardScene> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $StoryboardScenesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sortIndexMeta = const VerificationMeta(
+    'sortIndex',
+  );
+  @override
+  late final GeneratedColumn<int> sortIndex = GeneratedColumn<int>(
+    'sort_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _numberModeMeta = const VerificationMeta(
+    'numberMode',
+  );
+  @override
+  late final GeneratedColumn<String> numberMode = GeneratedColumn<String>(
+    'number_mode',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('auto'),
+  );
+  static const VerificationMeta _manualNumberMeta = const VerificationMeta(
+    'manualNumber',
+  );
+  @override
+  late final GeneratedColumn<String> manualNumber = GeneratedColumn<String>(
+    'manual_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    projectId,
+    sortIndex,
+    numberMode,
+    manualNumber,
+    name,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'storyboard_scenes';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<StoryboardScene> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('sort_index')) {
+      context.handle(
+        _sortIndexMeta,
+        sortIndex.isAcceptableOrUnknown(data['sort_index']!, _sortIndexMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sortIndexMeta);
+    }
+    if (data.containsKey('number_mode')) {
+      context.handle(
+        _numberModeMeta,
+        numberMode.isAcceptableOrUnknown(data['number_mode']!, _numberModeMeta),
+      );
+    }
+    if (data.containsKey('manual_number')) {
+      context.handle(
+        _manualNumberMeta,
+        manualNumber.isAcceptableOrUnknown(
+          data['manual_number']!,
+          _manualNumberMeta,
+        ),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  StoryboardScene map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return StoryboardScene(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      sortIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_index'],
+      )!,
+      numberMode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}number_mode'],
+      )!,
+      manualNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}manual_number'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $StoryboardScenesTable createAlias(String alias) {
+    return $StoryboardScenesTable(attachedDatabase, alias);
+  }
+}
+
+class StoryboardScene extends DataClass implements Insertable<StoryboardScene> {
+  final String id;
+  final String projectId;
+  final int sortIndex;
+  final String numberMode;
+  final String manualNumber;
+  final String name;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const StoryboardScene({
+    required this.id,
+    required this.projectId,
+    required this.sortIndex,
+    required this.numberMode,
+    required this.manualNumber,
+    required this.name,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['project_id'] = Variable<String>(projectId);
+    map['sort_index'] = Variable<int>(sortIndex);
+    map['number_mode'] = Variable<String>(numberMode);
+    map['manual_number'] = Variable<String>(manualNumber);
+    map['name'] = Variable<String>(name);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  StoryboardScenesCompanion toCompanion(bool nullToAbsent) {
+    return StoryboardScenesCompanion(
+      id: Value(id),
+      projectId: Value(projectId),
+      sortIndex: Value(sortIndex),
+      numberMode: Value(numberMode),
+      manualNumber: Value(manualNumber),
+      name: Value(name),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory StoryboardScene.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return StoryboardScene(
+      id: serializer.fromJson<String>(json['id']),
+      projectId: serializer.fromJson<String>(json['projectId']),
+      sortIndex: serializer.fromJson<int>(json['sortIndex']),
+      numberMode: serializer.fromJson<String>(json['numberMode']),
+      manualNumber: serializer.fromJson<String>(json['manualNumber']),
+      name: serializer.fromJson<String>(json['name']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'projectId': serializer.toJson<String>(projectId),
+      'sortIndex': serializer.toJson<int>(sortIndex),
+      'numberMode': serializer.toJson<String>(numberMode),
+      'manualNumber': serializer.toJson<String>(manualNumber),
+      'name': serializer.toJson<String>(name),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  StoryboardScene copyWith({
+    String? id,
+    String? projectId,
+    int? sortIndex,
+    String? numberMode,
+    String? manualNumber,
+    String? name,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => StoryboardScene(
+    id: id ?? this.id,
+    projectId: projectId ?? this.projectId,
+    sortIndex: sortIndex ?? this.sortIndex,
+    numberMode: numberMode ?? this.numberMode,
+    manualNumber: manualNumber ?? this.manualNumber,
+    name: name ?? this.name,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  StoryboardScene copyWithCompanion(StoryboardScenesCompanion data) {
+    return StoryboardScene(
+      id: data.id.present ? data.id.value : this.id,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
+      numberMode: data.numberMode.present
+          ? data.numberMode.value
+          : this.numberMode,
+      manualNumber: data.manualNumber.present
+          ? data.manualNumber.value
+          : this.manualNumber,
+      name: data.name.present ? data.name.value : this.name,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('StoryboardScene(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('sortIndex: $sortIndex, ')
+          ..write('numberMode: $numberMode, ')
+          ..write('manualNumber: $manualNumber, ')
+          ..write('name: $name, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    projectId,
+    sortIndex,
+    numberMode,
+    manualNumber,
+    name,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is StoryboardScene &&
+          other.id == this.id &&
+          other.projectId == this.projectId &&
+          other.sortIndex == this.sortIndex &&
+          other.numberMode == this.numberMode &&
+          other.manualNumber == this.manualNumber &&
+          other.name == this.name &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class StoryboardScenesCompanion extends UpdateCompanion<StoryboardScene> {
+  final Value<String> id;
+  final Value<String> projectId;
+  final Value<int> sortIndex;
+  final Value<String> numberMode;
+  final Value<String> manualNumber;
+  final Value<String> name;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const StoryboardScenesCompanion({
+    this.id = const Value.absent(),
+    this.projectId = const Value.absent(),
+    this.sortIndex = const Value.absent(),
+    this.numberMode = const Value.absent(),
+    this.manualNumber = const Value.absent(),
+    this.name = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  StoryboardScenesCompanion.insert({
+    required String id,
+    required String projectId,
+    required int sortIndex,
+    this.numberMode = const Value.absent(),
+    this.manualNumber = const Value.absent(),
+    this.name = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       projectId = Value(projectId),
+       sortIndex = Value(sortIndex),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<StoryboardScene> custom({
+    Expression<String>? id,
+    Expression<String>? projectId,
+    Expression<int>? sortIndex,
+    Expression<String>? numberMode,
+    Expression<String>? manualNumber,
+    Expression<String>? name,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (projectId != null) 'project_id': projectId,
+      if (sortIndex != null) 'sort_index': sortIndex,
+      if (numberMode != null) 'number_mode': numberMode,
+      if (manualNumber != null) 'manual_number': manualNumber,
+      if (name != null) 'name': name,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  StoryboardScenesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? projectId,
+    Value<int>? sortIndex,
+    Value<String>? numberMode,
+    Value<String>? manualNumber,
+    Value<String>? name,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return StoryboardScenesCompanion(
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      sortIndex: sortIndex ?? this.sortIndex,
+      numberMode: numberMode ?? this.numberMode,
+      manualNumber: manualNumber ?? this.manualNumber,
+      name: name ?? this.name,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (sortIndex.present) {
+      map['sort_index'] = Variable<int>(sortIndex.value);
+    }
+    if (numberMode.present) {
+      map['number_mode'] = Variable<String>(numberMode.value);
+    }
+    if (manualNumber.present) {
+      map['manual_number'] = Variable<String>(manualNumber.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('StoryboardScenesCompanion(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('sortIndex: $sortIndex, ')
+          ..write('numberMode: $numberMode, ')
+          ..write('manualNumber: $manualNumber, ')
+          ..write('name: $name, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5032,6 +5589,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ProjectsTable projects = $ProjectsTable(this);
   late final $ShotsTable shots = $ShotsTable(this);
   late final $ShotAssetsTable shotAssets = $ShotAssetsTable(this);
+  late final $StoryboardScenesTable storyboardScenes = $StoryboardScenesTable(
+    this,
+  );
   late final $CustomColumnsTable customColumns = $CustomColumnsTable(this);
   late final $ShotCustomValuesTable shotCustomValues = $ShotCustomValuesTable(
     this,
@@ -5052,6 +5612,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     projects,
     shots,
     shotAssets,
+    storyboardScenes,
     customColumns,
     shotCustomValues,
     planSections,
@@ -5243,6 +5804,7 @@ typedef $$ShotsTableCreateCompanionBuilder =
       required String id,
       required String projectId,
       required int orderIndex,
+      Value<String> sceneId,
       required String shotNo,
       required String shotSize,
       required int durationSec,
@@ -5262,6 +5824,7 @@ typedef $$ShotsTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> projectId,
       Value<int> orderIndex,
+      Value<String> sceneId,
       Value<String> shotNo,
       Value<String> shotSize,
       Value<int> durationSec,
@@ -5297,6 +5860,11 @@ class $$ShotsTableFilterComposer extends Composer<_$AppDatabase, $ShotsTable> {
 
   ColumnFilters<int> get orderIndex => $composableBuilder(
     column: $table.orderIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sceneId => $composableBuilder(
+    column: $table.sceneId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5385,6 +5953,11 @@ class $$ShotsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get sceneId => $composableBuilder(
+    column: $table.sceneId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get shotNo => $composableBuilder(
     column: $table.shotNo,
     builder: (column) => ColumnOrderings(column),
@@ -5466,6 +6039,9 @@ class $$ShotsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get sceneId =>
+      $composableBuilder(column: $table.sceneId, builder: (column) => column);
+
   GeneratedColumn<String> get shotNo =>
       $composableBuilder(column: $table.shotNo, builder: (column) => column);
 
@@ -5544,6 +6120,7 @@ class $$ShotsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> projectId = const Value.absent(),
                 Value<int> orderIndex = const Value.absent(),
+                Value<String> sceneId = const Value.absent(),
                 Value<String> shotNo = const Value.absent(),
                 Value<String> shotSize = const Value.absent(),
                 Value<int> durationSec = const Value.absent(),
@@ -5561,6 +6138,7 @@ class $$ShotsTableTableManager
                 id: id,
                 projectId: projectId,
                 orderIndex: orderIndex,
+                sceneId: sceneId,
                 shotNo: shotNo,
                 shotSize: shotSize,
                 durationSec: durationSec,
@@ -5580,6 +6158,7 @@ class $$ShotsTableTableManager
                 required String id,
                 required String projectId,
                 required int orderIndex,
+                Value<String> sceneId = const Value.absent(),
                 required String shotNo,
                 required String shotSize,
                 required int durationSec,
@@ -5597,6 +6176,7 @@ class $$ShotsTableTableManager
                 id: id,
                 projectId: projectId,
                 orderIndex: orderIndex,
+                sceneId: sceneId,
                 shotNo: shotNo,
                 shotSize: shotSize,
                 durationSec: durationSec,
@@ -5927,6 +6507,273 @@ typedef $$ShotAssetsTableProcessedTableManager =
       $$ShotAssetsTableUpdateCompanionBuilder,
       (ShotAsset, BaseReferences<_$AppDatabase, $ShotAssetsTable, ShotAsset>),
       ShotAsset,
+      PrefetchHooks Function()
+    >;
+typedef $$StoryboardScenesTableCreateCompanionBuilder =
+    StoryboardScenesCompanion Function({
+      required String id,
+      required String projectId,
+      required int sortIndex,
+      Value<String> numberMode,
+      Value<String> manualNumber,
+      Value<String> name,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$StoryboardScenesTableUpdateCompanionBuilder =
+    StoryboardScenesCompanion Function({
+      Value<String> id,
+      Value<String> projectId,
+      Value<int> sortIndex,
+      Value<String> numberMode,
+      Value<String> manualNumber,
+      Value<String> name,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$StoryboardScenesTableFilterComposer
+    extends Composer<_$AppDatabase, $StoryboardScenesTable> {
+  $$StoryboardScenesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortIndex => $composableBuilder(
+    column: $table.sortIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get numberMode => $composableBuilder(
+    column: $table.numberMode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get manualNumber => $composableBuilder(
+    column: $table.manualNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$StoryboardScenesTableOrderingComposer
+    extends Composer<_$AppDatabase, $StoryboardScenesTable> {
+  $$StoryboardScenesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortIndex => $composableBuilder(
+    column: $table.sortIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get numberMode => $composableBuilder(
+    column: $table.numberMode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get manualNumber => $composableBuilder(
+    column: $table.manualNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$StoryboardScenesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $StoryboardScenesTable> {
+  $$StoryboardScenesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
+
+  GeneratedColumn<int> get sortIndex =>
+      $composableBuilder(column: $table.sortIndex, builder: (column) => column);
+
+  GeneratedColumn<String> get numberMode => $composableBuilder(
+    column: $table.numberMode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get manualNumber => $composableBuilder(
+    column: $table.manualNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$StoryboardScenesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $StoryboardScenesTable,
+          StoryboardScene,
+          $$StoryboardScenesTableFilterComposer,
+          $$StoryboardScenesTableOrderingComposer,
+          $$StoryboardScenesTableAnnotationComposer,
+          $$StoryboardScenesTableCreateCompanionBuilder,
+          $$StoryboardScenesTableUpdateCompanionBuilder,
+          (
+            StoryboardScene,
+            BaseReferences<
+              _$AppDatabase,
+              $StoryboardScenesTable,
+              StoryboardScene
+            >,
+          ),
+          StoryboardScene,
+          PrefetchHooks Function()
+        > {
+  $$StoryboardScenesTableTableManager(
+    _$AppDatabase db,
+    $StoryboardScenesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$StoryboardScenesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$StoryboardScenesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$StoryboardScenesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> projectId = const Value.absent(),
+                Value<int> sortIndex = const Value.absent(),
+                Value<String> numberMode = const Value.absent(),
+                Value<String> manualNumber = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => StoryboardScenesCompanion(
+                id: id,
+                projectId: projectId,
+                sortIndex: sortIndex,
+                numberMode: numberMode,
+                manualNumber: manualNumber,
+                name: name,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String projectId,
+                required int sortIndex,
+                Value<String> numberMode = const Value.absent(),
+                Value<String> manualNumber = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => StoryboardScenesCompanion.insert(
+                id: id,
+                projectId: projectId,
+                sortIndex: sortIndex,
+                numberMode: numberMode,
+                manualNumber: manualNumber,
+                name: name,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$StoryboardScenesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $StoryboardScenesTable,
+      StoryboardScene,
+      $$StoryboardScenesTableFilterComposer,
+      $$StoryboardScenesTableOrderingComposer,
+      $$StoryboardScenesTableAnnotationComposer,
+      $$StoryboardScenesTableCreateCompanionBuilder,
+      $$StoryboardScenesTableUpdateCompanionBuilder,
+      (
+        StoryboardScene,
+        BaseReferences<_$AppDatabase, $StoryboardScenesTable, StoryboardScene>,
+      ),
+      StoryboardScene,
       PrefetchHooks Function()
     >;
 typedef $$CustomColumnsTableCreateCompanionBuilder =
@@ -7686,6 +8533,8 @@ class $AppDatabaseManager {
       $$ShotsTableTableManager(_db, _db.shots);
   $$ShotAssetsTableTableManager get shotAssets =>
       $$ShotAssetsTableTableManager(_db, _db.shotAssets);
+  $$StoryboardScenesTableTableManager get storyboardScenes =>
+      $$StoryboardScenesTableTableManager(_db, _db.storyboardScenes);
   $$CustomColumnsTableTableManager get customColumns =>
       $$CustomColumnsTableTableManager(_db, _db.customColumns);
   $$ShotCustomValuesTableTableManager get shotCustomValues =>

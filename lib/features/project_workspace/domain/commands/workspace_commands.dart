@@ -5,6 +5,7 @@ import '../models/column_preset.dart';
 import '../models/column_template.dart';
 import '../models/custom_column_definition.dart';
 import '../models/shot_record.dart';
+import '../models/storyboard_scene.dart';
 
 enum ProjectHistoryScope { workspace }
 
@@ -85,11 +86,13 @@ class CreateShotCommand extends AppCommand {
     required this.projectId,
     this.seedShot,
     this.insertIndex,
+    this.sceneId,
   });
 
   final String projectId;
   final ShotRecord? seedShot;
   final int? insertIndex;
+  final String? sceneId;
 
   @override
   String get label => 'CreateShot';
@@ -386,6 +389,64 @@ class UnassignShotFromPlanCommand extends AppCommand {
 
   @override
   String get label => 'UnassignShotFromPlan';
+}
+
+class CreateSceneCommand extends AppCommand {
+  const CreateSceneCommand({
+    required this.projectId,
+    required this.insertIndex,
+    this.name = '',
+    this.numberMode = StoryboardSceneNumberMode.auto,
+    this.manualNumber = '',
+  });
+
+  final String projectId;
+  final int insertIndex;
+  final String name;
+  final StoryboardSceneNumberMode numberMode;
+  final String manualNumber;
+
+  @override
+  String get label => 'CreateScene';
+}
+
+class UpdateSceneCommand extends AppCommand {
+  const UpdateSceneCommand({
+    required this.projectId,
+    required this.scene,
+  });
+
+  final String projectId;
+  final StoryboardScene scene;
+
+  @override
+  String get label => 'UpdateScene';
+}
+
+class DeleteEmptySceneCommand extends AppCommand {
+  const DeleteEmptySceneCommand({
+    required this.projectId,
+    required this.sceneId,
+  });
+
+  final String projectId;
+  final String sceneId;
+
+  @override
+  String get label => 'DeleteEmptyScene';
+}
+
+class ReorderScenesCommand extends AppCommand {
+  const ReorderScenesCommand({
+    required this.projectId,
+    required this.orderedSceneIds,
+  });
+
+  final String projectId;
+  final List<String> orderedSceneIds;
+
+  @override
+  String get label => 'ReorderScenes';
 }
 
 class GenerateCallSheetCommand extends AppCommand {
