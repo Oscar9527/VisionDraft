@@ -23,6 +23,7 @@ dependencies:
   path_provider: ^2.1.5
   file_selector: ^1.0.3
   archive: ^4.0.7
+  xml: ^6.5.0
   crypto: ^3.0.6
   collection: ^1.19.1
   drag_and_drop_lists: ^0.4.2

@@ -37,6 +37,11 @@ typedef ShotAssetRelinker =
     });
 typedef RowActionRequested = Future<void> Function(int rowIndex);
 typedef DeleteRowRequested = Future<void> Function(String shotId);
+typedef ShotDropRequested =
+    Future<void> Function({
+      required String shotId,
+      required int targetIndex,
+    });
 
 typedef AddColumnRequested = Future<void> Function();
 typedef ColumnActionRequested = Future<void> Function(String fieldKey);
@@ -52,6 +57,17 @@ typedef FixedFieldOptionDeleteRequested =
     Future<void> Function({required String fieldKey, required String option});
 typedef CustomColumnOptionDeleteRequested =
     Future<void> Function({required String columnId, required String option});
+
+const String _shotDragPrefix = 'shot:';
+
+String _shotDragData(String shotId) => '$_shotDragPrefix$shotId';
+
+String? _extractShotDragId(Object? data) {
+  if (data is! String || !data.startsWith(_shotDragPrefix)) {
+    return null;
+  }
+  return data.substring(_shotDragPrefix.length);
+}
 
 class StoryboardTable extends StatefulWidget {
   const StoryboardTable({
@@ -72,6 +88,8 @@ class StoryboardTable extends StatefulWidget {
     required this.onInsertRowAbove,
     required this.onInsertRowBelow,
     required this.onDeleteRow,
+    this.onDropShot,
+    this.dragGroup,
     required this.onAddColumn,
     required this.onHideColumn,
     required this.onReorderField,
@@ -105,6 +123,8 @@ class StoryboardTable extends StatefulWidget {
   final RowActionRequested onInsertRowAbove;
   final RowActionRequested onInsertRowBelow;
   final DeleteRowRequested onDeleteRow;
+  final ShotDropRequested? onDropShot;
+  final Object? dragGroup;
   final AddColumnRequested onAddColumn;
   final ColumnActionRequested onHideColumn;
   final ReorderFieldRequested onReorderField;
@@ -131,6 +151,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
   final Map<String, FocusNode> _cellFocusNodes = <String, FocusNode>{};
   bool _syncingHeader = false;
   bool _syncingContent = false;
+  String? _draggingShotId;
 
   double get _uiScale => widget.zoomPercent / 100;
   double get _leadingWidth => 64;
@@ -290,148 +311,37 @@ class _StoryboardTableState extends State<StoryboardTable> {
                     ),
                   ),
                   Expanded(
-                    child: ReorderableListView.builder(
-                      buildDefaultDragHandles: false,
-                      onReorder: widget.isBatchMode
-                          ? (_, _) {}
-                          : widget.onReorder,
-                      itemCount: widget.shots.length,
+                    child: ListView.builder(
+                      itemCount: widget.shots.length + 1,
                       itemBuilder: (context, index) {
+                        if (index == widget.shots.length) {
+                          return _buildRowDropTarget(
+                            targetIndex: widget.shots.length,
+                            totalWidth: totalWidth,
+                            isDark: isDark,
+                          );
+                        }
                         final shot = widget.shots[index];
-                        final selected = widget.selectedShotIds.contains(
-                          shot.id,
-                        );
                         final rowHeight = _rowHeight(shot.id);
-                        return Container(
-                          key: ValueKey(shot.id),
-                          height: rowHeight,
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? Theme.of(context).colorScheme.primaryContainer
-                                      .withValues(alpha: isDark ? 0.22 : 0.14)
-                                : index.isOdd
-                                ? Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                      .withValues(alpha: isDark ? 0.16 : 0.06)
-                                : Colors.transparent,
-                            border: Border(
-                              top: BorderSide(
-                                color: Theme.of(
-                                  context,
-                                ).dividerColor.withValues(alpha: 0.75),
-                              ),
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildRowDropTarget(
+                              targetIndex: index,
+                              totalWidth: totalWidth,
+                              isDark: isDark,
                             ),
-                          ),
-                          child: Stack(
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  SizedBox(
-                                    width: _leadingWidth,
-                                    child: _buildLeadingCell(
-                                      context,
-                                      index,
-                                      shot,
-                                      selected,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: SingleChildScrollView(
-                                      controller: _contentController,
-                                      scrollDirection: Axis.horizontal,
-                                      child: SizedBox(
-                                        width: totalWidth - _leadingWidth,
-                                        child: Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.stretch,
-                                          children: [
-                                            for (final entry
-                                                in visibleFields
-                                                    .asMap()
-                                                    .entries)
-                                              _EditableCell(
-                                                key: ValueKey(
-                                                  '${shot.id}:${entry.value}',
-                                                ),
-                                                width:
-                                                    resolvedWidths[entry
-                                                        .value]!,
-                                                height: rowHeight,
-                                                shot: shot,
-                                                fieldKey: entry.value,
-                                                orderedFieldKeys: visibleFields,
-                                                orderedShotIds: [
-                                                  for (final item
-                                                      in widget.shots)
-                                                    item.id,
-                                                ],
-                                                customColumns:
-                                                    widget.customColumns,
-                                                fixedFieldCustomOptions: widget
-                                                    .fixedFieldCustomOptions,
-                                                boardPreset: widget.boardPreset,
-                                                uiScale: _uiScale,
-                                                showLeadingBorder:
-                                                    entry.key > 0,
-                                                focusNode: _focusNodeFor(
-                                                  shot.id,
-                                                  entry.value,
-                                                ),
-                                                onFocused: () => widget
-                                                    .onFocusedCellChanged
-                                                    ?.call(
-                                                      FocusedGridCell(
-                                                        shotId: shot.id,
-                                                        fieldKey: entry.value,
-                                                      ),
-                                                    ),
-                                                onNavigate: _handleNavigation,
-                                                onUpdateField:
-                                                    widget.onUpdateField,
-                                                onImportAsset:
-                                                    widget.onImportAsset,
-                                                onRelinkAsset:
-                                                    widget.onRelinkAsset,
-                                                onDeleteFixedFieldOption: widget
-                                                    .onDeleteFixedFieldOption,
-                                                onDeleteCustomColumnOption: widget
-                                                    .onDeleteCustomColumnOption,
-                                              ),
-                                            Container(
-                                              width: _trailingWidth,
-                                              decoration: BoxDecoration(
-                                                border: visibleFields.isEmpty
-                                                    ? null
-                                                    : Border(
-                                                        left: BorderSide(
-                                                          color:
-                                                              Theme.of(context)
-                                                                  .dividerColor
-                                                                  .withValues(
-                                                                    alpha: 0.72,
-                                                                  ),
-                                                        ),
-                                                      ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              _RowResizeHandle(
-                                initialHeight: rowHeight,
-                                minHeight: _minimumDisplayRowHeight,
-                                maxHeight: _maximumDisplayRowHeight,
-                                onHeightChanged: (height) =>
-                                    _applyRowHeightChange(shot.id, height),
-                              ),
-                            ],
-                          ),
+                            _buildShotRow(
+                              context,
+                              shot: shot,
+                              index: index,
+                              rowHeight: rowHeight,
+                              totalWidth: totalWidth,
+                              isDark: isDark,
+                              visibleFields: visibleFields,
+                              resolvedWidths: resolvedWidths,
+                            ),
+                          ],
                         );
                       },
                     ),
@@ -465,6 +375,181 @@ class _StoryboardTableState extends State<StoryboardTable> {
     }
   }
 
+  Widget _buildShotRow(
+    BuildContext context, {
+    required ShotRecord shot,
+    required int index,
+    required double rowHeight,
+    required double totalWidth,
+    required bool isDark,
+    required List<String> visibleFields,
+    required Map<String, double> resolvedWidths,
+  }) {
+    final selected = widget.selectedShotIds.contains(shot.id);
+    final rowContent = Container(
+      key: ValueKey(shot.id),
+      height: rowHeight,
+      decoration: BoxDecoration(
+        color: selected
+            ? Theme.of(context).colorScheme.primaryContainer.withValues(
+                alpha: isDark ? 0.22 : 0.14,
+              )
+            : index.isOdd
+            ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(
+                alpha: isDark ? 0.16 : 0.06,
+              )
+            : Colors.transparent,
+        border: Border(
+          top: BorderSide(
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.75),
+          ),
+        ),
+      ),
+      child: Stack(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: _leadingWidth,
+                child: _buildLeadingCell(
+                  context,
+                  index,
+                  shot,
+                  selected,
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _contentController,
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: totalWidth - _leadingWidth,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final entry in visibleFields.asMap().entries)
+                          _EditableCell(
+                            key: ValueKey('${shot.id}:${entry.value}'),
+                            width: resolvedWidths[entry.value]!,
+                            height: rowHeight,
+                            shot: shot,
+                            fieldKey: entry.value,
+                            orderedFieldKeys: visibleFields,
+                            orderedShotIds: [
+                              for (final item in widget.shots) item.id,
+                            ],
+                            customColumns: widget.customColumns,
+                            fixedFieldCustomOptions:
+                                widget.fixedFieldCustomOptions,
+                            boardPreset: widget.boardPreset,
+                            uiScale: _uiScale,
+                            showLeadingBorder: entry.key > 0,
+                            focusNode: _focusNodeFor(shot.id, entry.value),
+                            onFocused: () => widget.onFocusedCellChanged?.call(
+                              FocusedGridCell(
+                                shotId: shot.id,
+                                fieldKey: entry.value,
+                              ),
+                            ),
+                            onNavigate: _handleNavigation,
+                            onUpdateField: widget.onUpdateField,
+                            onImportAsset: widget.onImportAsset,
+                            onRelinkAsset: widget.onRelinkAsset,
+                            onDeleteFixedFieldOption:
+                                widget.onDeleteFixedFieldOption,
+                            onDeleteCustomColumnOption:
+                                widget.onDeleteCustomColumnOption,
+                          ),
+                        Container(
+                          width: _trailingWidth,
+                          decoration: BoxDecoration(
+                            border: visibleFields.isEmpty
+                                ? null
+                                : Border(
+                                    left: BorderSide(
+                                      color: Theme.of(context)
+                                          .dividerColor
+                                          .withValues(alpha: 0.72),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          _RowResizeHandle(
+            initialHeight: rowHeight,
+            minHeight: _minimumDisplayRowHeight,
+            maxHeight: _maximumDisplayRowHeight,
+            onHeightChanged: (height) => _applyRowHeightChange(shot.id, height),
+          ),
+        ],
+      ),
+    );
+
+    return rowContent;
+  }
+
+  Widget _buildRowDropTarget({
+    required int targetIndex,
+    required double totalWidth,
+    required bool isDark,
+  }) {
+    if (widget.isBatchMode || widget.onDropShot == null) {
+      return const SizedBox.shrink();
+    }
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          _extractShotDragId(details.data) != null,
+      onAcceptWithDetails: (details) async {
+        final shotId = _extractShotDragId(details.data);
+        if (shotId == null) {
+          return;
+        }
+        await widget.onDropShot!(
+          shotId: shotId,
+          targetIndex: targetIndex,
+        );
+      },
+      builder: (context, candidateData, rejectedData) {
+        final active = candidateData.isNotEmpty;
+        final dragging = _draggingShotId != null;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          height: active ? 16 : (dragging ? 10 : 6),
+          margin: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: active
+                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.16)
+                : dragging
+                ? Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.06)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: active
+              ? Center(
+                  child: Container(
+                    height: 3,
+                    width: totalWidth,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                )
+              : null,
+        );
+      },
+    );
+  }
+
   Widget _buildLeadingCell(
     BuildContext context,
     int index,
@@ -480,74 +565,141 @@ class _StoryboardTableState extends State<StoryboardTable> {
         ),
       );
     }
-    return ReorderableDragStartListener(
-      index: index,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        decoration: BoxDecoration(
-          border: Border(
-            right: BorderSide(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.72),
+    final dragHandle = widget.onDropShot == null
+        ? _buildDragHandleIcon(context)
+        : Draggable<String>(
+            data: _shotDragData(shot.id),
+            dragAnchorStrategy: pointerDragAnchorStrategy,
+            maxSimultaneousDrags: 1,
+            onDragStarted: () {
+              setState(() {
+                _draggingShotId = shot.id;
+              });
+            },
+            onDragEnd: (_) {
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                _draggingShotId = null;
+              });
+            },
+            onDraggableCanceled: (_, _) {
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                _draggingShotId = null;
+              });
+            },
+            feedback: Material(
+              elevation: 6,
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 240,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      shot.content.trim().isEmpty
+                          ? '镜头 ${shot.shotNo}'
+                          : shot.content,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                ),
+              ),
             ),
+            childWhenDragging: Opacity(
+              opacity: 0.32,
+              child: _buildDragHandleIcon(context),
+            ),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.grab,
+              child: _buildDragHandleIcon(context),
+            ),
+          );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        border: Border(
+          right: BorderSide(
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.72),
           ),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest
-                    .withValues(
-                      alpha: Theme.of(context).brightness == Brightness.dark
-                          ? 0.5
-                          : 0.32,
-                    ),
-                shape: BoxShape.circle,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          dragHandle,
+          PopupMenuButton<_RowAction>(
+            tooltip: '行操作',
+            padding: EdgeInsets.zero,
+            constraints: _rowMenuConstraints,
+            onSelected: (action) async {
+              switch (action) {
+                case _RowAction.insertAbove:
+                  await widget.onInsertRowAbove(index);
+                case _RowAction.insertBelow:
+                  await widget.onInsertRowBelow(index);
+                case _RowAction.deleteRow:
+                  await widget.onDeleteRow(shot.id);
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _RowAction.insertAbove,
+                child: SizedBox(width: 140, child: Text('上方插入一行')),
               ),
-              child: Icon(
-                Icons.drag_indicator_rounded,
-                size: 15,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              PopupMenuItem(
+                value: _RowAction.insertBelow,
+                child: SizedBox(width: 140, child: Text('下方插入一行')),
               ),
+              PopupMenuItem(
+                value: _RowAction.deleteRow,
+                child: SizedBox(width: 140, child: Text('删除本行')),
+              ),
+            ],
+            icon: Icon(
+              Icons.more_vert_rounded,
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
-            PopupMenuButton<_RowAction>(
-              tooltip: '行操作',
-              padding: EdgeInsets.zero,
-              constraints: _rowMenuConstraints,
-              onSelected: (action) async {
-                switch (action) {
-                  case _RowAction.insertAbove:
-                    await widget.onInsertRowAbove(index);
-                  case _RowAction.insertBelow:
-                    await widget.onInsertRowBelow(index);
-                  case _RowAction.deleteRow:
-                    await widget.onDeleteRow(shot.id);
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: _RowAction.insertAbove,
-                  child: SizedBox(width: 140, child: Text('上方插入一行')),
-                ),
-                PopupMenuItem(
-                  value: _RowAction.insertBelow,
-                  child: SizedBox(width: 140, child: Text('下方插入一行')),
-                ),
-                PopupMenuItem(
-                  value: _RowAction.deleteRow,
-                  child: SizedBox(width: 140, child: Text('删除本行')),
-                ),
-              ],
-              icon: Icon(
-                Icons.more_vert_rounded,
-                size: 16,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDragHandleIcon(BuildContext context) {
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest
+            .withValues(
+              alpha: Theme.of(context).brightness == Brightness.dark
+                  ? 0.5
+                  : 0.32,
             ),
-          ],
-        ),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        Icons.drag_indicator_rounded,
+        size: 15,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     );
   }
@@ -646,14 +798,14 @@ class _StoryboardTableState extends State<StoryboardTable> {
   double _defaultColumnWidth(String fieldKey) {
     final custom = _findCustomColumn(fieldKey);
     if (custom?.type == CustomColumnType.image) {
-      return _clampDouble(220, _minimumColumnWidth(fieldKey), _maximumColumnWidth(fieldKey));
+      return _clampDouble(180, _minimumColumnWidth(fieldKey), _maximumColumnWidth(fieldKey));
     }
     final base = switch (fieldKey) {
       'shotNo' => 92.0,
       'durationSec' => 84.0,
       'shotSize' => 100.0,
-      'frameImage' => 260.0,
-      'referenceImage' => 220.0,
+      'frameImage' => 210.0,
+      'referenceImage' => 180.0,
       'content' => 230.0,
       'dialogue' => 164.0,
       'notes' => 172.0,
@@ -676,21 +828,21 @@ class _StoryboardTableState extends State<StoryboardTable> {
     final base = _baseMinimumColumnWidth(fieldKey);
     final label = _labelFor(fieldKey);
     final estimatedLabelWidth = _estimateHeaderLabelWidth(label);
-    final actionWidth = 24.0 + 18.0;
+    final actionWidth = _isImageFieldKey(fieldKey) ? 26.0 : 42.0;
     return math.max(base, estimatedLabelWidth + actionWidth);
   }
 
   double _baseMinimumColumnWidth(String fieldKey) {
     final custom = _findCustomColumn(fieldKey);
     if (custom?.type == CustomColumnType.image) {
-      return 180.0;
+      return 120.0;
     }
     return switch (fieldKey) {
       'shotNo' => 90.0,
       'durationSec' => 92.0,
       'shotSize' => 108.0,
-      'frameImage' => 180.0,
-      'referenceImage' => 180.0,
+      'frameImage' => 120.0,
+      'referenceImage' => 120.0,
       'content' => 188.0,
       'dialogue' => 156.0,
       'notes' => 148.0,
@@ -707,7 +859,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
   double _maximumColumnWidth(String fieldKey) {
     final custom = _findCustomColumn(fieldKey);
     if (custom?.type == CustomColumnType.image) {
-      return 420.0;
+      return 340.0;
     }
     final base = switch (fieldKey) {
       'content' ||
@@ -715,7 +867,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
       'notes' ||
       'sceneExpectation' ||
       'audio' => 520.0,
-      'frameImage' || 'referenceImage' => 420.0,
+      'frameImage' || 'referenceImage' => 340.0,
       _ => 300.0,
     };
     return math.max(base, _minimumColumnWidth(fieldKey));
@@ -759,6 +911,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
     }
 
     var targets = visibleFields
+        .where((fieldKey) => !_isImageFieldKey(fieldKey))
         .where(_prefersWidthExpansion)
         .where(
           (fieldKey) => widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
@@ -767,6 +920,15 @@ class _StoryboardTableState extends State<StoryboardTable> {
     if (targets.isEmpty) {
       targets = visibleFields
           .where((fieldKey) => fieldKey != ShotFieldKey.shotNo.storageKey)
+          .where((fieldKey) => !_isImageFieldKey(fieldKey))
+          .where(
+            (fieldKey) =>
+                widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
+          )
+          .toList();
+    }
+    if (targets.isEmpty) {
+      targets = visibleFields
           .where(
             (fieldKey) =>
                 widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
@@ -797,12 +959,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
   }
 
   bool _prefersWidthExpansion(String fieldKey) {
-    if (_isImageFieldKey(fieldKey)) {
-      return true;
-    }
     return switch (fieldKey) {
-      'frameImage' ||
-      'referenceImage' ||
       'content' ||
       'dialogue' ||
       'notes' ||
@@ -1118,8 +1275,8 @@ class _HeaderCellState extends State<_HeaderCell> {
             bottom: 0,
             child: MouseRegion(
               cursor: SystemMouseCursors.resizeColumn,
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
                 onHorizontalDragStart: (_) {
                   _dragStartWidth = widget.width;
                 },
@@ -1136,7 +1293,7 @@ class _HeaderCellState extends State<_HeaderCell> {
                   );
                 },
                 child: SizedBox(
-                  width: 8,
+                  width: 12,
                   child: Align(
                     alignment: Alignment.centerRight,
                     child: Container(
@@ -1924,7 +2081,7 @@ class _EditableCellState extends State<_EditableCell> {
   }
 }
 
-class _ImageFieldCell extends StatelessWidget {
+class _ImageFieldCell extends StatefulWidget {
   const _ImageFieldCell({
     required this.asset,
     required this.previewHeight,
@@ -1946,114 +2103,135 @@ class _ImageFieldCell extends StatelessWidget {
   final VoidCallback? onClear;
 
   @override
+  State<_ImageFieldCell> createState() => _ImageFieldCellState();
+}
+
+class _ImageFieldCellState extends State<_ImageFieldCell> {
+  bool _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
-    final uri = asset?.uri;
+    final uri = widget.asset?.uri;
     final file = (uri != null && uri.isNotEmpty) ? File(uri) : null;
     final canPreview = file != null && file.existsSync();
-    final hasAsset = asset != null;
+    final hasAsset = widget.asset != null;
     final scheme = Theme.of(context).colorScheme;
+    final showActions = _hovering || !hasAsset || !canPreview;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          height: previewHeight,
-          child: Stack(
-            children: [
-              Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(
-                    _clampDouble(6 * uiScale, 4, 10),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: widget.previewHeight,
+            child: Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(
+                      _clampDouble(6 * widget.uiScale, 4, 10),
+                    ),
+                    border: Border.all(
+                      color: Theme.of(
+                        context,
+                      ).dividerColor.withValues(alpha: 0.9),
+                    ),
                   ),
-                  border: Border.all(
-                    color: Theme.of(
-                      context,
-                    ).dividerColor.withValues(alpha: 0.9),
-                  ),
+                  child: canPreview
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(
+                            _clampDouble(6 * widget.uiScale, 4, 10),
+                          ),
+                          child: Image.file(
+                            file,
+                            width: double.infinity,
+                            fit: widget.fitMode == ImageFitMode.cover
+                                ? BoxFit.cover
+                                : BoxFit.contain,
+                          ),
+                        )
+                      : const Center(
+                          child: Icon(
+                            Icons.add_photo_alternate_outlined,
+                            size: 22,
+                          ),
+                        ),
                 ),
-                child: canPreview
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(
-                          _clampDouble(6 * uiScale, 4, 10),
+                Positioned(
+                  top: _clampDouble(4 * widget.uiScale, 3, 8),
+                  right: _clampDouble(4 * widget.uiScale, 3, 8),
+                  child: IgnorePointer(
+                    ignoring: !showActions,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 120),
+                      opacity: showActions ? 1 : 0,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.surface.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: scheme.outlineVariant),
                         ),
-                        child: Image.file(
-                          file,
-                          width: double.infinity,
-                          fit: fitMode == ImageFitMode.cover
-                              ? BoxFit.cover
-                              : BoxFit.contain,
-                        ),
-                      )
-                    : const Center(
-                        child: Icon(
-                          Icons.add_photo_alternate_outlined,
-                          size: 22,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: _clampDouble(1 * widget.uiScale, 1, 3),
+                            vertical: _clampDouble(1 * widget.uiScale, 1, 2),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _MiniIconAction(
+                                tooltip: hasAsset ? '替换图片' : '导入图片',
+                                icon: Icons.upload_file_outlined,
+                                uiScale: widget.uiScale,
+                                onPressed: widget.onImportManaged,
+                              ),
+                              _MiniIconAction(
+                                tooltip: '外链图片',
+                                icon: Icons.link_outlined,
+                                uiScale: widget.uiScale,
+                                onPressed: widget.onImportLinked,
+                              ),
+                              if (hasAsset && widget.onRelink != null)
+                                _MiniIconAction(
+                                  tooltip: '重连图片',
+                                  icon: Icons.sync_outlined,
+                                  uiScale: widget.uiScale,
+                                  onPressed: widget.onRelink,
+                                ),
+                              if (hasAsset && widget.onClear != null)
+                                _MiniIconAction(
+                                  tooltip: '清除图片',
+                                  icon: Icons.delete_outline_rounded,
+                                  uiScale: widget.uiScale,
+                                  onPressed: widget.onClear,
+                                ),
+                            ],
+                          ),
                         ),
                       ),
-              ),
-              Positioned(
-                top: _clampDouble(4 * uiScale, 3, 8),
-                right: _clampDouble(4 * uiScale, 3, 8),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.surface.withValues(alpha: 0.92),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: scheme.outlineVariant),
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: _clampDouble(2 * uiScale, 1, 4),
-                      vertical: _clampDouble(1 * uiScale, 1, 3),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _MiniIconAction(
-                          tooltip: hasAsset ? '替换图片' : '导入图片',
-                          icon: Icons.upload_file_outlined,
-                          uiScale: uiScale,
-                          onPressed: onImportManaged,
-                        ),
-                        _MiniIconAction(
-                          tooltip: '外链图片',
-                          icon: Icons.link_outlined,
-                          uiScale: uiScale,
-                          onPressed: onImportLinked,
-                        ),
-                        if (hasAsset && onRelink != null)
-                          _MiniIconAction(
-                            tooltip: '重连图片',
-                            icon: Icons.sync_outlined,
-                            uiScale: uiScale,
-                            onPressed: onRelink,
-                          ),
-                        if (hasAsset && onClear != null)
-                          _MiniIconAction(
-                            tooltip: '清除图片',
-                            icon: Icons.delete_outline_rounded,
-                            uiScale: uiScale,
-                            onPressed: onClear,
-                          ),
-                      ],
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        SizedBox(height: _clampDouble(4 * uiScale, 3, 8)),
-        Text(
-          hasAsset ? '已关联图片' : '未关联图片',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(
-            context,
-          ).textTheme.labelSmall?.copyWith(fontSize: _clampDouble(11 * uiScale, 10, 14)),
-        ),
-      ],
+          SizedBox(height: _clampDouble(4 * widget.uiScale, 3, 8)),
+          Text(
+            hasAsset ? '已关联图片' : '未关联图片',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(
+              fontSize: _clampDouble(11 * widget.uiScale, 10, 14),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2079,10 +2257,10 @@ class _MiniIconAction extends StatelessWidget {
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: BoxConstraints.tightFor(
-        width: _clampDouble(24 * uiScale, 22, 34),
-        height: _clampDouble(24 * uiScale, 22, 34),
+        width: _clampDouble(20 * uiScale, 18, 28),
+        height: _clampDouble(20 * uiScale, 18, 28),
       ),
-      icon: Icon(icon, size: _clampDouble(14 * uiScale, 12, 18)),
+      icon: Icon(icon, size: _clampDouble(12 * uiScale, 11, 16)),
     );
   }
 }

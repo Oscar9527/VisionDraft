@@ -450,18 +450,19 @@ class ProjectWorkspaceCommandService {
     );
   }
 
-  Future<void> createScene({
+  Future<StoryboardScene> createScene({
     required String projectId,
     required int insertIndex,
     String name = '',
   }) async {
-    await commandBus.dispatch(
+    final result = await commandBus.dispatch(
       CreateSceneCommand(
         projectId: projectId,
         insertIndex: insertIndex,
         name: name,
       ),
     );
+    return result.payload! as StoryboardScene;
   }
 
   Future<void> updateScene({

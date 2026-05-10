@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
@@ -12,7 +12,7 @@ import '../../features/project_workspace/domain/models/board_preset.dart';
 import '../../features/project_workspace/domain/models/export_payload.dart';
 import '../../features/project_workspace/domain/models/shot_fields.dart';
 import '../../features/project_workspace/domain/models/shot_record.dart';
-import '../../features/project_workspace/domain/models/storyboard_scene.dart';
+import 'shot_sheet_export_layout.dart';
 
 class PdfExportService {
   const PdfExportService();
@@ -93,25 +93,19 @@ class PdfExportService {
     ExportPayload payload,
     pw.MemoryImage? brandingLogo,
   ) async {
-    final visibleFields = _visibleShotSheetFields(payload);
+    final resolved = const ShotSheetExportLayoutResolver().resolve(payload);
+    final visibleFields = resolved.fields.orderedVisibleFieldKeys;
 
     final imageCache = <String, pw.MemoryImage>{};
-    final baseColumnWidths = {
-      for (final fieldKey in visibleFields)
-        fieldKey: _sheetColumnWidthValue(payload, fieldKey),
-    };
-    final baseRowHeights = {
-      for (final shot in payload.shots)
-        shot.id: _sheetRowHeightValue(payload, shot.id, visibleFields),
-    };
     final layout = _resolveShotSheetLayout(
       payload: payload,
       visibleFields: visibleFields,
-      columnWidths: baseColumnWidths,
-      rowHeights: baseRowHeights,
+      columnWidths: resolved.columnWidths,
+      rowHeights: resolved.rowHeights,
+      imageFields: resolved.fields.imageFieldKeys,
     );
     final shotPages = _paginateShotSheetSceneRows(
-      payload: payload,
+      sceneGroups: resolved.sceneGroups,
       rowHeights: layout.rowHeights,
       headerRowHeight: layout.headerRowHeight,
       pageBodyHeight: layout.tableBodyHeight,
@@ -152,6 +146,7 @@ class PdfExportService {
             bodyFontSize: layout.bodyFontSize,
             maxTextLines: layout.maxTextLines,
             imagePadding: layout.imagePadding,
+            imageFields: resolved.fields.imageFieldKeys,
           ),
         );
       }
@@ -487,53 +482,7 @@ class PdfExportService {
     );
   }
 
-  double _sheetColumnWidthValue(ExportPayload payload, String fieldKey) {
-    final sessionWidth = payload.effectiveColumnWidths[fieldKey];
-    if (sessionWidth != null && sessionWidth > 0) {
-      return sessionWidth;
-    }
-    final editorScale = _editorScale(payload);
-    if (_isImageField(payload, fieldKey)) {
-      return ((fieldKey == ShotFieldKey.frameImage.storageKey ? 260 : 220) *
-              editorScale)
-          .toDouble();
-    }
-    return ((switch (fieldKey) {
-          'shotNo' => 92,
-          'durationSec' => 84,
-          'shotSize' => 100,
-          'frameImage' || 'referenceImage' => 220,
-          'content' => 230,
-          'dialogue' => 164,
-          'notes' => 172,
-          'sceneExpectation' => 172,
-          'audio' => 152,
-          'cameraAngle' => 110,
-          'cameraMove' => 110,
-          'cameraRig' => 120,
-          'focalLength' => 100,
-          _ => 140,
-        }).toDouble() *
-        editorScale);
-  }
 
-  double _sheetRowHeightValue(
-    ExportPayload payload,
-    String shotId,
-    List<String> visibleFields,
-  ) {
-    final sessionHeight = payload.effectiveRowHeights[shotId];
-    if (sessionHeight != null && sessionHeight > 0) {
-      return sessionHeight;
-    }
-    final editorScale = _editorScale(payload);
-    return ((visibleFields.any((fieldKey) => _isImageField(payload, fieldKey))
-                ? 108
-                : 76)
-            .toDouble() *
-        editorScale)
-        .toDouble();
-  }
 
   Future<pw.TableRow> _shotSheetRow({
     required ShotRecord shot,
@@ -545,12 +494,13 @@ class PdfExportService {
     required double bodyFontSize,
     required int maxTextLines,
     required double imagePadding,
+    required Set<String> imageFields,
   }) async {
     final cells = <pw.Widget>[];
 
     for (final fieldKey in fields) {
-      if (_isImageField(payload, fieldKey)) {
-        final asset = _assetForField(shot, fieldKey);
+      if (imageFields.contains(fieldKey)) {
+        final asset = shotSheetAssetForField(shot, fieldKey);
         final image = await _loadMemoryImage(asset, imageCache);
         cells.add(
           pw.Container(
@@ -575,7 +525,7 @@ class PdfExportService {
             vertical: math.max(2.0, imagePadding * 0.72),
           ),
           child: pw.Text(
-            _fieldValue(shot, fieldKey, preset),
+            shotSheetFieldValue(shot, fieldKey, preset),
             style: pw.TextStyle(fontSize: bodyFontSize),
             maxLines: maxTextLines,
             overflow: pw.TextOverflow.clip,
@@ -632,6 +582,13 @@ class PdfExportService {
                   projectName,
                   style: pw.TextStyle(fontSize: projectSize),
                 ),
+                if (payload.scenes.length > 1) ...[
+                  pw.SizedBox(height: 2),
+                  pw.Text(
+                    '场标题行会在表格内按“1场 / 2场 ...”区分各场镜头',
+                    style: pw.TextStyle(fontSize: math.max(7.2, projectSize - 1.2)),
+                  ),
+                ],
               ],
             ),
           ),
@@ -819,33 +776,6 @@ class PdfExportService {
     return fixed?.label ?? payload.fieldLabelsByKey[fieldKey] ?? '自定义列';
   }
 
-  String _fieldValue(ShotRecord shot, String fieldKey, BoardPreset preset) {
-    final customValue = shot.customFieldValues[fieldKey];
-    if (customValue is AssetRef) {
-      return customValue.uri;
-    }
-    if (customValue != null) {
-      return '$customValue'.trim();
-    }
-
-    return switch (fieldKey) {
-      'shotNo' => _displayShotNo(preset, shot),
-      'shotSize' => shot.shotSize,
-      'durationSec' => '${shot.durationSec}s',
-      'content' => shot.content,
-      'dialogue' => shot.dialogue,
-      'notes' => shot.notes,
-      'sceneExpectation' => shot.sceneExpectation,
-      'audio' => shot.audio,
-      'cameraAngle' => shot.cameraAngle,
-      'cameraMove' => shot.cameraMove,
-      'cameraRig' => shot.cameraRig,
-      'focalLength' => shot.focalLength,
-      'frameImage' => shot.frameImage?.uri ?? '',
-      'referenceImage' => shot.referenceImage?.uri ?? '',
-      _ => '',
-    }.trim();
-  }
 
   String _timestamp(DateTime time) {
     return DateFormat('yyyy-MM-dd HH:mm').format(time);
@@ -881,52 +811,20 @@ class PdfExportService {
     );
   }
 
-  List<String> _visibleShotSheetFields(ExportPayload payload) {
-    final sourceOrder = payload.effectiveFieldOrderKeys.isNotEmpty
-        ? payload.effectiveFieldOrderKeys
-        : payload.columnPreset.fieldOrderKeys;
-    final visibleFields = sourceOrder
-        .where(
-          (fieldKey) =>
-              payload.columnPreset.visibleFieldKeys.contains(fieldKey) ||
-              fieldKey == ShotFieldKey.shotNo.storageKey,
-        )
-        .toList();
-    if (!visibleFields.contains(ShotFieldKey.shotNo.storageKey)) {
-      visibleFields.insert(0, ShotFieldKey.shotNo.storageKey);
-    }
-    return visibleFields;
-  }
 
-  bool _isImageField(ExportPayload payload, String fieldKey) {
-    if (fieldKey == ShotFieldKey.frameImage.storageKey ||
-        fieldKey == ShotFieldKey.referenceImage.storageKey) {
-      return true;
-    }
-    return payload.shots.any((shot) => shot.customFieldValues[fieldKey] is AssetRef);
-  }
 
-  AssetRef? _assetForField(ShotRecord shot, String fieldKey) {
-    if (fieldKey == ShotFieldKey.frameImage.storageKey) {
-      return shot.frameImage;
-    }
-    if (fieldKey == ShotFieldKey.referenceImage.storageKey) {
-      return shot.referenceImage;
-    }
-    final value = shot.customFieldValues[fieldKey];
-    return value is AssetRef ? value : null;
-  }
 
   _ShotSheetLayout _resolveShotSheetLayout({
     required ExportPayload payload,
     required List<String> visibleFields,
     required Map<String, double> columnWidths,
     required Map<String, double> rowHeights,
+    required Set<String> imageFields,
   }) {
     final pageFormat = PdfPageFormat.a4.landscape;
     const margin = pw.EdgeInsets.fromLTRB(10, 10, 10, 10);
     const headerSpacing = 6.0;
-    final hasImage = visibleFields.any((fieldKey) => _isImageField(payload, fieldKey));
+    final hasImage = visibleFields.any(imageFields.contains);
     final isDenseTextMode = !hasImage;
     final editorScale = _editorScale(payload);
     final editorFontBias = math.pow(editorScale, 0.12).toDouble();
@@ -943,9 +841,9 @@ class PdfExportService {
       availableWidth / math.max(desiredColumnWidthTotal, 1.0),
     );
     final normalizedColumnWidths = _expandShotSheetColumnWidths(
-      payload: payload,
       visibleFields: visibleFields,
       availableWidth: availableWidth,
+      imageFields: imageFields,
       columnWidths: {
         for (final fieldKey in visibleFields)
           fieldKey: math.max(1.0, columnWidths[fieldKey] ?? 1.0) * widthFitScale,
@@ -1070,9 +968,9 @@ class PdfExportService {
   }
 
   Map<String, double> _expandShotSheetColumnWidths({
-    required ExportPayload payload,
     required List<String> visibleFields,
     required double availableWidth,
+    required Set<String> imageFields,
     required Map<String, double> columnWidths,
   }) {
     final widths = <String, double>{...columnWidths};
@@ -1080,7 +978,8 @@ class PdfExportService {
       return widths;
     }
 
-    var remainingWidth = availableWidth - widths.values.fold<double>(0, (sum, value) => sum + value);
+    var remainingWidth = availableWidth -
+        widths.values.fold<double>(0, (sum, value) => sum + value);
     if (remainingWidth <= 1.0) {
       return widths;
     }
@@ -1091,7 +990,7 @@ class PdfExportService {
     while (remainingWidth > 0.5 && expandable.isNotEmpty) {
       final totalWeight = expandable.fold<double>(
         0,
-        (sum, fieldKey) => sum + _shotSheetColumnExpansionWeight(payload, fieldKey),
+        (sum, fieldKey) => sum + _shotSheetColumnExpansionWeight(fieldKey, imageFields),
       );
       if (totalWeight <= 0) {
         break;
@@ -1101,12 +1000,12 @@ class PdfExportService {
       var consumedWidth = 0.0;
       for (final fieldKey in expandable) {
         final current = widths[fieldKey] ?? 0;
-        final maxWidth = _shotSheetMaxColumnWidth(payload, fieldKey);
+        final maxWidth = _shotSheetMaxColumnWidth(fieldKey, imageFields);
         if (current >= maxWidth - 0.5) {
           continue;
         }
         final ratio =
-            _shotSheetColumnExpansionWeight(payload, fieldKey) / totalWeight;
+            _shotSheetColumnExpansionWeight(fieldKey, imageFields) / totalWeight;
         final delta = math.min(
           remainingWidth * ratio,
           maxWidth - current,
@@ -1130,21 +1029,24 @@ class PdfExportService {
     return widths;
   }
 
-  double _shotSheetColumnExpansionWeight(ExportPayload payload, String fieldKey) {
-    if (_isImageField(payload, fieldKey)) {
-      return 2.2;
+  double _shotSheetColumnExpansionWeight(
+    String fieldKey,
+    Set<String> imageFields,
+  ) {
+    if (imageFields.contains(fieldKey)) {
+      return 1.05;
     }
     return switch (fieldKey) {
-      'content' || 'dialogue' || 'notes' || 'sceneExpectation' || 'audio' => 1.8,
+      'content' || 'dialogue' || 'notes' || 'sceneExpectation' || 'audio' => 1.95,
       'shotSize' || 'cameraAngle' || 'cameraMove' || 'cameraRig' => 1.2,
       'durationSec' => 0.9,
       _ => 1.0,
     };
   }
 
-  double _shotSheetMaxColumnWidth(ExportPayload payload, String fieldKey) {
-    if (_isImageField(payload, fieldKey)) {
-      return fieldKey == ShotFieldKey.frameImage.storageKey ? 300.0 : 250.0;
+  double _shotSheetMaxColumnWidth(String fieldKey, Set<String> imageFields) {
+    if (imageFields.contains(fieldKey)) {
+      return fieldKey == ShotFieldKey.frameImage.storageKey ? 240.0 : 220.0;
     }
     return switch (fieldKey) {
       'shotNo' => 96,
@@ -1164,12 +1066,13 @@ class PdfExportService {
   }
 
   List<List<_ScenePageRow>> _paginateShotSheetSceneRows({
-    required ExportPayload payload,
+    required List<ShotSheetSceneGroup> sceneGroups,
     required Map<String, double> rowHeights,
     required double headerRowHeight,
     required double pageBodyHeight,
   }) {
-    if (payload.shots.isEmpty) {
+    final allShots = sceneGroups.expand((group) => group.shots);
+    if (allShots.isEmpty) {
       return const [<_ScenePageRow>[]];
     }
 
@@ -1178,11 +1081,9 @@ class PdfExportService {
     var currentPage = <_ScenePageRow>[];
     var currentHeight = 0.0;
 
-    final groups = _buildSceneShotGroups(payload);
-    for (final group in groups) {
+    for (final group in sceneGroups) {
       if (group.showHeader) {
-        final wouldOverflow =
-            currentPage.isNotEmpty &&
+        final wouldOverflow = currentPage.isNotEmpty &&
             currentHeight + _shotSheetSceneHeaderHeight > bodyLimit;
         if (wouldOverflow) {
           pages.add(currentPage);
@@ -1218,38 +1119,6 @@ class PdfExportService {
     }
 
     return pages;
-  }
-
-  List<_SceneShotGroup> _buildSceneShotGroups(ExportPayload payload) {
-    final scenes = [...payload.scenes]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
-    if (scenes.isEmpty) {
-      return [
-        _SceneShotGroup(
-          showHeader: false,
-          headerLabel: '',
-          shots: payload.shots,
-        ),
-      ];
-    }
-    final shotsByScene = <String, List<ShotRecord>>{};
-    for (final shot in payload.shots) {
-      shotsByScene.putIfAbsent(shot.sceneId, () => <ShotRecord>[]).add(shot);
-    }
-    final hideSingleDefaultScene =
-        scenes.length == 1 &&
-        scenes.first.name.trim().isEmpty &&
-        scenes.first.numberMode == StoryboardSceneNumberMode.auto;
-    return [
-      for (var index = 0; index < scenes.length; index++)
-        _SceneShotGroup(
-          showHeader: !hideSingleDefaultScene,
-          headerLabel: scenes[index].name.trim().isEmpty
-              ? '${scenes[index].displayNumber(index + 1)}场'
-              : '${scenes[index].displayNumber(index + 1)}场  ${scenes[index].name.trim()}',
-          shots: [...(shotsByScene[scenes[index].id] ?? const <ShotRecord>[])]
-            ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex)),
-        ),
-    ];
   }
 
   double _editorScale(ExportPayload payload) {
@@ -1309,18 +1178,7 @@ class _ScenePageShotRow extends _ScenePageRow {
   final ShotRecord shot;
 }
 
-class _SceneShotGroup {
-  const _SceneShotGroup({
-    required this.showHeader,
-    required this.headerLabel,
-    required this.shots,
-  });
-
-  final bool showHeader;
-  final String headerLabel;
-  final List<ShotRecord> shots;
-}
-
 double _clampDouble(double value, double min, double max) {
   return math.min(math.max(value, min), max);
 }
+

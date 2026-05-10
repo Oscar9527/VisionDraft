@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:collection/collection.dart';
 
 import '../../../../app/bootstrap/providers.dart';
 import '../../../../core/widgets/surface_card.dart';
@@ -13,6 +14,34 @@ import '../../../project_workspace/domain/models/shot_record.dart';
 import '../../../project_workspace/domain/models/shot_fields.dart';
 import '../../../project_workspace/domain/models/storyboard_scene.dart';
 import '../widgets/storyboard_table.dart';
+
+const String _sceneDragPrefix = 'scene:';
+const String _shotDragPrefix = 'shot:';
+
+bool _shouldHideDefaultSceneChrome(List<StoryboardScene> scenes) {
+  if (scenes.length != 1) {
+    return false;
+  }
+  final scene = scenes.first;
+  return scene.name.trim().isEmpty &&
+      scene.numberMode == StoryboardSceneNumberMode.auto;
+}
+
+String _sceneDragData(String sceneId) => '$_sceneDragPrefix$sceneId';
+
+String? _extractSceneDragId(Object? data) {
+  if (data is! String || !data.startsWith(_sceneDragPrefix)) {
+    return null;
+  }
+  return data.substring(_sceneDragPrefix.length);
+}
+
+String? _extractShotDragId(Object? data) {
+  if (data is! String || !data.startsWith(_shotDragPrefix)) {
+    return null;
+  }
+  return data.substring(_shotDragPrefix.length);
+}
 
 class StoryboardEditorPage extends ConsumerStatefulWidget {
   const StoryboardEditorPage({
@@ -69,8 +98,153 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             name: name,
             type: type,
             enumSource: enumSource,
-          ),
+      ),
     );
+  }
+
+  int? _resolveInsertIndexForVisibleRow(
+    List<ShotRecord> allShots,
+    List<ShotRecord> visibleShots,
+    int rowIndex, {
+    required bool placeBelow,
+  }) {
+    if (rowIndex < 0 || rowIndex >= visibleShots.length) {
+      return null;
+    }
+    final anchorShotId = visibleShots[rowIndex].id;
+    final globalIndex = allShots.indexWhere((shot) => shot.id == anchorShotId);
+    if (globalIndex < 0) {
+      return null;
+    }
+    return placeBelow ? globalIndex + 1 : globalIndex;
+  }
+
+  Future<void> _reorderVisibleShots(
+    ProjectWorkspaceController controller,
+    List<ShotRecord> allShots,
+    List<ShotRecord> visibleShots,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    if (oldIndex < 0 || oldIndex >= visibleShots.length) {
+      return;
+    }
+    final activeSceneId = _activeSceneId;
+    if (activeSceneId == null) {
+      await controller.reorderShots(oldIndex, newIndex);
+      return;
+    }
+    final safeTarget = newIndex > oldIndex ? newIndex - 1 : newIndex;
+    final reorderedSceneShots = [...visibleShots];
+    final moved = reorderedSceneShots.removeAt(oldIndex);
+    reorderedSceneShots.insert(
+      safeTarget.clamp(0, reorderedSceneShots.length),
+      moved,
+    );
+
+    final reorderedSceneIds = reorderedSceneShots.map((shot) => shot.id).toList();
+    final nextShotIds = <String>[];
+    var insertedSceneShots = false;
+
+    for (final shot in allShots) {
+      if (shot.sceneId == activeSceneId) {
+        if (!insertedSceneShots) {
+          nextShotIds.addAll(reorderedSceneIds);
+          insertedSceneShots = true;
+        }
+        continue;
+      }
+      nextShotIds.add(shot.id);
+    }
+
+    if (!insertedSceneShots) {
+      nextShotIds.addAll(reorderedSceneIds);
+    }
+
+    await controller.reorderShotIds(nextShotIds);
+  }
+
+  Future<void> _moveShotToScene(
+    ProjectWorkspaceController controller,
+    String shotId,
+    String targetSceneId,
+    int? targetIndex,
+  ) async {
+    await controller.moveShotToScene(
+      shotId: shotId,
+      targetSceneId: targetSceneId,
+      targetIndex: targetIndex,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _activeSceneId = targetSceneId;
+      _selectedShotIds
+        ..clear()
+        ..add(shotId);
+    });
+  }
+
+  int _insertSceneIndex(List<StoryboardScene> scenes) {
+    final activeSceneId = _activeSceneId;
+    if (activeSceneId == null) {
+      return scenes.length;
+    }
+    final activeScene = scenes.firstWhereOrNull(
+      (scene) => scene.id == activeSceneId,
+    );
+    if (activeScene == null) {
+      return scenes.length;
+    }
+    return activeScene.sortIndex + 1;
+  }
+
+  Future<void> _reorderSceneBlocks(
+    ProjectWorkspaceController controller,
+    List<StoryboardScene> scenes,
+    String draggedSceneId,
+    int targetIndex,
+  ) async {
+    final orderedIds = [...scenes]
+      ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final sceneIds = orderedIds.map((scene) => scene.id).toList();
+    final sourceIndex = sceneIds.indexOf(draggedSceneId);
+    if (sourceIndex < 0) {
+      return;
+    }
+    final movedSceneId = sceneIds.removeAt(sourceIndex);
+    final safeTargetIndex = targetIndex > sourceIndex
+        ? targetIndex - 1
+        : targetIndex;
+    sceneIds.insert(
+      safeTargetIndex.clamp(0, sceneIds.length),
+      movedSceneId,
+    );
+    await controller.reorderScenes(sceneIds);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _activeSceneId = draggedSceneId;
+    });
+  }
+
+  double _estimateSceneTableHeight(
+    List<ShotRecord> shots,
+    Map<String, double> rowHeights,
+    double zoomPercent,
+  ) {
+    final scale = (zoomPercent / 100).clamp(0.7, 1.5);
+    if (shots.isEmpty) {
+      return 120;
+    }
+    var bodyHeight = 0.0;
+    for (final shot in shots) {
+      bodyHeight += (rowHeights[shot.id] ?? 88) * scale;
+    }
+    final estimated = bodyHeight + 56;
+    return estimated.clamp(220.0, 680.0);
   }
 
   @override
@@ -88,7 +262,28 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
       0,
       (sum, shot) => sum + shot.durationSec,
     );
+    final hideDefaultSceneChrome = _shouldHideDefaultSceneChrome(
+      snapshot.scenes,
+    );
     _activeSceneId ??= snapshot.scenes.isNotEmpty ? snapshot.scenes.first.id : null;
+    final hasActiveScene = snapshot.scenes.any((scene) => scene.id == _activeSceneId);
+    if (!hasActiveScene && snapshot.scenes.isNotEmpty) {
+      _activeSceneId = snapshot.scenes.first.id;
+    }
+    final activeSceneId = _activeSceneId;
+    final activeScene = activeSceneId == null
+        ? null
+        : snapshot.scenes.where((scene) => scene.id == activeSceneId).firstOrNull;
+    final activeSceneLabel = hideDefaultSceneChrome || activeScene == null
+        ? null
+        : activeScene.name.trim().isEmpty
+        ? '${activeScene.displayNumber(activeScene.sortIndex + 1)}场'
+        : '${activeScene.displayNumber(activeScene.sortIndex + 1)}场 ${activeScene.name.trim()}';
+    final visibleShots = activeSceneId == null
+        ? snapshot.shots
+        : snapshot.shots.where((shot) => shot.sceneId == activeSceneId).toList()
+          ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    final visibleShotIds = visibleShots.map((shot) => shot.id).toList();
 
     if (snapshot.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -173,15 +368,25 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           shotCount: snapshot.shots.length,
           totalDuration: totalDuration,
           selectedCount: _selectedShotIds.length,
+          activeSceneLabel: activeSceneLabel,
           isBatchMode: _isBatchMode,
           canUndo: history.canUndo,
           canRedo: history.canRedo,
           onUndo: controller.undo,
           onRedo: controller.redo,
           onCreateShot: () => controller.createShot(sceneId: _activeSceneId),
-          onCreateScene: () => controller.createScene(
-            insertIndex: snapshot.scenes.length,
-          ),
+          onCreateScene: () async {
+            final scene = await controller.createScene(
+              insertIndex: _insertSceneIndex(snapshot.scenes),
+            );
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _activeSceneId = scene.id;
+              _selectedShotIds.clear();
+            });
+          },
           onOpenAiStoryboard: () =>
               showAiStoryboardSheet(context, projectId: widget.projectId),
           onToggleBatchMode: () {
@@ -193,7 +398,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             });
           },
           onChooseSelection: (action) {
-            final shotIds = snapshot.shots.map((shot) => shot.id).toList();
+            final shotIds = visibleShotIds;
             setState(() {
               _isBatchMode = true;
               switch (action) {
@@ -244,6 +449,20 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                             )),
                       ),
                 ),
+          onDeleteSelected: _selectedShotIds.isEmpty
+              ? null
+              : () async {
+                  final selected = _selectedShotIds.toList();
+                  for (final shotId in selected) {
+                    await controller.deleteShot(shotId);
+                  }
+                  if (!mounted) {
+                    return;
+                  }
+                  setState(() {
+                    _selectedShotIds.clear();
+                  });
+                },
           onOpenBoardSettings: () => _showBoardSettingsSheet(
             context,
             preset: snapshot.boardPreset,
@@ -252,183 +471,262 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
           onOpenColumnSettings: () =>
               _openColumnSettings(context, controller, snapshot),
         ),
-        _SceneStrip(
-          scenes: snapshot.scenes,
-          shots: snapshot.shots,
-          activeSceneId: _activeSceneId,
-          onSelectScene: (sceneId) {
-            setState(() {
-              _activeSceneId = sceneId;
-            });
-          },
-          onCreateScene: () => controller.createScene(
-            insertIndex: snapshot.scenes.length,
-          ),
-          onRenameScene: (scene) async {
-            final next = await _showNamePrompt(
-              context,
-              title: '重命名场',
-              label: '场名称',
-              initialValue: scene.name,
-            );
-            if (next == null) {
-              return;
-            }
-            await controller.updateScene(
-              scene.copyWith(name: next.trim(), updatedAt: DateTime.now()),
-            );
-          },
-          onToggleNumberMode: (scene, useManual) async {
-            await controller.updateScene(
-              scene.copyWith(
-                numberMode: useManual
-                    ? StoryboardSceneNumberMode.manual
-                    : StoryboardSceneNumberMode.auto,
-                updatedAt: DateTime.now(),
-              ),
-            );
-          },
-          onEditManualNumber: (scene) async {
-            final next = await _showNamePrompt(
-              context,
-              title: '设置场号',
-              label: '场号',
-              initialValue: scene.manualNumber,
-            );
-            if (next == null) {
-              return;
-            }
-            await controller.updateScene(
-              scene.copyWith(
-                numberMode: StoryboardSceneNumberMode.manual,
-                manualNumber: next.trim(),
-                updatedAt: DateTime.now(),
-              ),
-            );
-          },
-          onDeleteScene: (scene) => controller.deleteEmptyScene(scene.id),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: StoryboardTable(
+        if (!hideDefaultSceneChrome) ...[
+          _SceneStrip(
+            scenes: snapshot.scenes,
             shots: snapshot.shots,
-            columnPreset: snapshot.columnPreset,
-            effectiveFieldOrderKeys: gridSession.effectiveFieldOrderKeys,
-            customColumns: snapshot.customColumns,
-            fixedFieldCustomOptions: snapshot.fixedFieldCustomOptions,
-            boardPreset: snapshot.boardPreset,
-            isBatchMode: _isBatchMode,
-            selectedShotIds: _selectedShotIds,
-            zoomPercent: gridSession.zoomPercent,
-            columnWidths: gridSession.columnWidthsByFieldKey,
-            rowHeights: gridSession.rowHeightsByShotId,
-            focusedCell: gridSession.focusedCell,
-            onZoomChanged: gridSessionController.setZoomPercent,
-            onColumnWidthChanged: gridSessionController.setColumnWidth,
-            onRowHeightChanged: gridSessionController.setRowHeight,
-            onFocusedCellChanged: gridSessionController.setFocusedCell,
-            onSelectShot: (shotId, selected) {
+            activeSceneId: _activeSceneId,
+            onSelectScene: (sceneId) {
               setState(() {
-                if (selected) {
-                  _selectedShotIds.add(shotId);
-                } else {
-                  _selectedShotIds.remove(shotId);
-                }
+                _activeSceneId = sceneId;
+                _selectedShotIds.clear();
               });
             },
-            onReorder: controller.reorderShots,
-            onUpdateField: controller.updateShotField,
-            onImportAsset: controller.importAsset,
-            onRelinkAsset: controller.relinkAsset,
-            onInsertRowAbove: (rowIndex) =>
-                controller.createShot(
-                  insertIndex: rowIndex,
-                  sceneId: _activeSceneId,
+            onMoveShotToScene: (shotId, targetSceneId) =>
+                _moveShotToScene(
+                  controller,
+                  shotId,
+                  targetSceneId,
+                  null,
                 ),
-            onInsertRowBelow: (rowIndex) =>
-                controller.createShot(
-                  insertIndex: rowIndex + 1,
-                  sceneId: _activeSceneId,
+            onCreateScene: () async {
+              final scene = await controller.createScene(
+                insertIndex: _insertSceneIndex(snapshot.scenes),
+              );
+              if (!context.mounted) {
+                return;
+              }
+              setState(() {
+                _activeSceneId = scene.id;
+                _selectedShotIds.clear();
+              });
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+        Expanded(
+          child: _SceneWorkspace(
+            scenes: snapshot.scenes,
+            shots: snapshot.shots,
+            showSceneHeaders: !hideDefaultSceneChrome,
+            activeSceneId: _activeSceneId,
+            onSelectScene: (sceneId) {
+              setState(() {
+                _activeSceneId = sceneId;
+                _selectedShotIds.clear();
+              });
+            },
+            onMoveShotToScene: (shotId, targetSceneId, targetIndex) =>
+                _moveShotToScene(
+                  controller,
+                  shotId,
+                  targetSceneId,
+                  targetIndex,
                 ),
-            onDeleteRow: controller.deleteShot,
-            onAddColumn: () async => _showCreateCustomColumnSheet(
-              context,
-              onSubmit: ({
-                required name,
-                required type,
-                enumSource,
-              }) => controller.createCustomColumn(
-                name: name,
-                type: type,
-                enumSource: enumSource,
-              ),
-            ),
-            onHideColumn: (fieldKey) async {
-              final nextVisible = snapshot.columnPreset.visibleFieldKeys
-                  .where((key) => key != fieldKey)
-                  .toList();
-              await controller.updateColumnPreset(
-                snapshot.columnPreset.copyWith(
-                  visibleFieldKeys: nextVisible,
+            onRenameScene: (scene) async {
+              final next = await _showNamePrompt(
+                context,
+                title: '重命名场',
+                label: '场名称',
+                initialValue: scene.name,
+              );
+              if (next == null) {
+                return;
+              }
+              await controller.updateScene(
+                scene.copyWith(name: next.trim(), updatedAt: DateTime.now()),
+              );
+            },
+            onToggleNumberMode: (scene, useManual) async {
+              await controller.updateScene(
+                scene.copyWith(
+                  numberMode: useManual
+                      ? StoryboardSceneNumberMode.manual
+                      : StoryboardSceneNumberMode.auto,
                   updatedAt: DateTime.now(),
                 ),
               );
             },
-            onReorderField:
-                ({
-                  required draggedFieldKey,
-                  required targetFieldKey,
-                  required placeAfter,
-                }) {
-                  final nextOrder = gridSessionController.reorderField(
-                    draggedFieldKey: draggedFieldKey,
-                    targetFieldKey: targetFieldKey,
-                    placeAfter: placeAfter,
-                    fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
-                  );
-                  if (nextOrder == null) {
-                    return;
-                  }
-                  controller.updateColumnPreset(
-                    snapshot.columnPreset.copyWith(
-                      fieldOrderKeys: nextOrder,
-                      updatedAt: DateTime.now(),
-                    ),
-                  );
-                },
-            onRenameColumn: (columnId) async {
-              final column = snapshot.customColumns
-                  .where((item) => item.id == columnId)
-                  .firstOrNull;
-              if (column == null) {
-                return;
-              }
+            onEditManualNumber: (scene) async {
               final next = await _showNamePrompt(
                 context,
-                title: '重命名列',
-                label: '列名',
-                initialValue: column.name,
+                title: '设置场号',
+                label: '场号',
+                initialValue: scene.manualNumber,
               );
-              if (next == null || next.trim().isEmpty) {
+              if (next == null) {
                 return;
               }
-              await controller.renameCustomColumn(
-                columnId: columnId,
-                name: next.trim(),
+              await controller.updateScene(
+                scene.copyWith(
+                  numberMode: StoryboardSceneNumberMode.manual,
+                  manualNumber: next.trim(),
+                  updatedAt: DateTime.now(),
+                ),
               );
             },
-            onDeleteColumn: controller.deleteCustomColumn,
-            onDeleteFixedFieldOption: ({required fieldKey, required option}) =>
-                controller.deleteFixedFieldCustomOption(
-                  fieldKey: fieldKey,
-                  option: option,
+            onDeleteScene: (scene) => controller.deleteEmptyScene(scene.id),
+            onReorderScene: (draggedSceneId, targetIndex) =>
+                _reorderSceneBlocks(
+                  controller,
+                  snapshot.scenes,
+                  draggedSceneId,
+                  targetIndex,
                 ),
-            onDeleteCustomColumnOption:
-                ({required columnId, required option}) =>
-                    controller.deleteCustomColumnOption(
-                      columnId: columnId,
-                      option: option,
+            sceneTableBuilder: (sceneId, sceneShots) {
+              return SizedBox(
+                height: _estimateSceneTableHeight(
+                  sceneShots,
+                  gridSession.rowHeightsByShotId,
+                  gridSession.zoomPercent,
+                ),
+                child: StoryboardTable(
+                  shots: sceneShots,
+                  columnPreset: snapshot.columnPreset,
+                  effectiveFieldOrderKeys: gridSession.effectiveFieldOrderKeys,
+                  customColumns: snapshot.customColumns,
+                  fixedFieldCustomOptions: snapshot.fixedFieldCustomOptions,
+                  boardPreset: snapshot.boardPreset,
+                  isBatchMode: _isBatchMode,
+                  selectedShotIds: _selectedShotIds.intersection(
+                    sceneShots.map((shot) => shot.id).toSet(),
+                  ),
+                  zoomPercent: gridSession.zoomPercent,
+                  columnWidths: gridSession.columnWidthsByFieldKey,
+                  rowHeights: gridSession.rowHeightsByShotId,
+                  focusedCell: gridSession.focusedCell,
+                  onZoomChanged: gridSessionController.setZoomPercent,
+                  onColumnWidthChanged: gridSessionController.setColumnWidth,
+                  onRowHeightChanged: gridSessionController.setRowHeight,
+                  onFocusedCellChanged: gridSessionController.setFocusedCell,
+                  onSelectShot: (shotId, selected) {
+                    setState(() {
+                      if (selected) {
+                        _selectedShotIds.add(shotId);
+                      } else {
+                        _selectedShotIds.remove(shotId);
+                      }
+                    });
+                  },
+                  onReorder: (oldIndex, newIndex) => _reorderVisibleShots(
+                    controller,
+                    snapshot.shots,
+                    sceneShots,
+                    oldIndex,
+                    newIndex,
+                  ),
+                  onUpdateField: controller.updateShotField,
+                  onImportAsset: controller.importAsset,
+                  onRelinkAsset: controller.relinkAsset,
+                  onInsertRowAbove: (rowIndex) =>
+                      controller.createShot(
+                        insertIndex: _resolveInsertIndexForVisibleRow(
+                          snapshot.shots,
+                          sceneShots,
+                          rowIndex,
+                          placeBelow: false,
+                        ),
+                        sceneId: sceneId,
+                      ),
+                  onInsertRowBelow: (rowIndex) =>
+                      controller.createShot(
+                        insertIndex: _resolveInsertIndexForVisibleRow(
+                          snapshot.shots,
+                          sceneShots,
+                          rowIndex,
+                          placeBelow: true,
+                        ),
+                        sceneId: sceneId,
+                      ),
+                  onDeleteRow: controller.deleteShot,
+                  onDropShot: ({required shotId, required targetIndex}) =>
+                      _moveShotToScene(
+                        controller,
+                        shotId,
+                        sceneId,
+                        targetIndex,
+                      ),
+                  onAddColumn: () async => _showCreateCustomColumnSheet(
+                    context,
+                    onSubmit: ({
+                      required name,
+                      required type,
+                      enumSource,
+                    }) => controller.createCustomColumn(
+                      name: name,
+                      type: type,
+                      enumSource: enumSource,
                     ),
+                  ),
+                  onHideColumn: (fieldKey) async {
+                    final nextVisible = snapshot.columnPreset.visibleFieldKeys
+                        .where((key) => key != fieldKey)
+                        .toList();
+                    await controller.updateColumnPreset(
+                      snapshot.columnPreset.copyWith(
+                        visibleFieldKeys: nextVisible,
+                        updatedAt: DateTime.now(),
+                      ),
+                    );
+                  },
+                  onReorderField:
+                      ({
+                        required draggedFieldKey,
+                        required targetFieldKey,
+                        required placeAfter,
+                      }) {
+                        final nextOrder = gridSessionController.reorderField(
+                          draggedFieldKey: draggedFieldKey,
+                          targetFieldKey: targetFieldKey,
+                          placeAfter: placeAfter,
+                          fallbackOrder: snapshot.columnPreset.fieldOrderKeys,
+                        );
+                        if (nextOrder == null) {
+                          return;
+                        }
+                        controller.updateColumnPreset(
+                          snapshot.columnPreset.copyWith(
+                            fieldOrderKeys: nextOrder,
+                            updatedAt: DateTime.now(),
+                          ),
+                        );
+                      },
+                  onRenameColumn: (columnId) async {
+                    final column = snapshot.customColumns
+                        .where((item) => item.id == columnId)
+                        .firstOrNull;
+                    if (column == null) {
+                      return;
+                    }
+                    final next = await _showNamePrompt(
+                      context,
+                      title: '重命名列',
+                      label: '列名',
+                      initialValue: column.name,
+                    );
+                    if (next == null || next.trim().isEmpty) {
+                      return;
+                    }
+                    await controller.renameCustomColumn(
+                      columnId: columnId,
+                      name: next.trim(),
+                    );
+                  },
+                  onDeleteColumn: controller.deleteCustomColumn,
+                  onDeleteFixedFieldOption: ({required fieldKey, required option}) =>
+                      controller.deleteFixedFieldCustomOption(
+                        fieldKey: fieldKey,
+                        option: option,
+                      ),
+                  onDeleteCustomColumnOption:
+                      ({required columnId, required option}) =>
+                          controller.deleteCustomColumnOption(
+                            columnId: columnId,
+                            option: option,
+                          ),
+                ),
+              );
+            },
           ),
         ),
       ],
@@ -1454,6 +1752,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.shotCount,
     required this.totalDuration,
     required this.selectedCount,
+    required this.activeSceneLabel,
     required this.isBatchMode,
     required this.canUndo,
     required this.canRedo,
@@ -1466,6 +1765,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.onChooseSelection,
     required this.onOpenBatchEdit,
     required this.onOpenBatchRowHeight,
+    required this.onDeleteSelected,
     required this.onOpenBoardSettings,
     required this.onOpenColumnSettings,
   });
@@ -1473,6 +1773,7 @@ class _EditorToolbar extends StatelessWidget {
   final int shotCount;
   final int totalDuration;
   final int selectedCount;
+  final String? activeSceneLabel;
   final bool isBatchMode;
   final bool canUndo;
   final bool canRedo;
@@ -1485,6 +1786,7 @@ class _EditorToolbar extends StatelessWidget {
   final ValueChanged<_SelectionAction> onChooseSelection;
   final VoidCallback? onOpenBatchEdit;
   final VoidCallback? onOpenBatchRowHeight;
+  final VoidCallback? onDeleteSelected;
   final VoidCallback onOpenBoardSettings;
   final VoidCallback onOpenColumnSettings;
 
@@ -1517,6 +1819,15 @@ class _EditorToolbar extends StatelessWidget {
                             const SizedBox(width: 6),
                             Text('已选 $selectedCount', style: summaryStyle),
                           ],
+                          if (activeSceneLabel != null &&
+                              activeSceneLabel!.trim().isNotEmpty)
+                            ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                '当前场：$activeSceneLabel',
+                                style: summaryStyle,
+                              ),
+                            ],
                           SizedBox(width: dense ? 10 : 12),
                           _ToolbarPillButton(
                             icon: Icons.checklist_rtl_rounded,
@@ -1546,6 +1857,7 @@ class _EditorToolbar extends StatelessWidget {
                               label: selectedCount > 0
                                   ? '选择($selectedCount)'
                                   : '选择',
+                              forceEnabledAppearance: true,
                             ),
                           ),
                           if (isBatchMode) ...[
@@ -1560,6 +1872,12 @@ class _EditorToolbar extends StatelessWidget {
                               icon: Icons.height_rounded,
                               label: '批量行高',
                               onPressed: onOpenBatchRowHeight,
+                            ),
+                            const SizedBox(width: 6),
+                            _ToolbarPillButton(
+                              icon: Icons.delete_sweep_rounded,
+                              label: '批量删除',
+                              onPressed: onDeleteSelected,
                             ),
                           ],
                           SizedBox(width: compact ? 6 : 8),
@@ -1669,23 +1987,17 @@ class _SceneStrip extends StatelessWidget {
     required this.shots,
     required this.activeSceneId,
     required this.onSelectScene,
+    required this.onMoveShotToScene,
     required this.onCreateScene,
-    required this.onRenameScene,
-    required this.onToggleNumberMode,
-    required this.onEditManualNumber,
-    required this.onDeleteScene,
   });
 
   final List<StoryboardScene> scenes;
   final List<ShotRecord> shots;
   final String? activeSceneId;
   final ValueChanged<String> onSelectScene;
+  final Future<void> Function(String shotId, String targetSceneId)
+  onMoveShotToScene;
   final VoidCallback onCreateScene;
-  final Future<void> Function(StoryboardScene scene) onRenameScene;
-  final Future<void> Function(StoryboardScene scene, bool useManual)
-      onToggleNumberMode;
-  final Future<void> Function(StoryboardScene scene) onEditManualNumber;
-  final Future<void> Function(StoryboardScene scene) onDeleteScene;
 
   @override
   Widget build(BuildContext context) {
@@ -1713,71 +2025,89 @@ class _SceneStrip extends StatelessWidget {
                 final label = scene.name.trim().isEmpty
                     ? '$number场'
                     : '$number场  ${scene.name.trim()}';
-                final isEmpty = count == 0;
-                return MenuAnchor(
-                  builder: (context, controller, child) {
-                    final isActive = activeSceneId == scene.id;
-                    return OutlinedButton(
-                      onPressed: () => onSelectScene(scene.id),
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        backgroundColor: isActive
-                            ? Theme.of(context).colorScheme.primaryContainer
-                            : null,
-                      ),
-                      child: GestureDetector(
-                        onSecondaryTap: () {
-                          controller.isOpen ? controller.close() : controller.open();
-                        },
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(label),
-                            const SizedBox(width: 6),
-                            Text(
-                              '$count',
-                              style: Theme.of(context).textTheme.labelSmall,
+                final isActive = activeSceneId == scene.id;
+                final theme = Theme.of(context);
+                final scheme = theme.colorScheme;
+                final borderColor = isActive
+                    ? scheme.primary.withValues(alpha: 0.4)
+                    : theme.dividerColor;
+                final backgroundColor = isActive
+                    ? scheme.primaryContainer
+                    : scheme.surface;
+                final foregroundColor = isActive
+                    ? scheme.onPrimaryContainer
+                    : theme.textTheme.bodyMedium?.color;
+                return DragTarget<String>(
+                  onWillAcceptWithDetails: (details) =>
+                      _extractShotDragId(details.data) != null,
+                  onAcceptWithDetails: (details) async {
+                    final shotId = _extractShotDragId(details.data);
+                    if (shotId == null) {
+                      return;
+                    }
+                    await onMoveShotToScene(shotId, scene.id);
+                  },
+                  builder: (context, candidateData, rejectedData) {
+                    final highlighted = candidateData.isNotEmpty;
+                    return Material(
+                      color: highlighted
+                          ? scheme.primaryContainer.withValues(alpha: 0.88)
+                          : backgroundColor,
+                      borderRadius: BorderRadius.circular(10),
+                      child: InkWell(
+                        onTap: () => onSelectScene(scene.id),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: highlighted
+                                ? scheme.primaryContainer.withValues(alpha: 0.88)
+                                : backgroundColor,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: highlighted
+                                  ? scheme.primary
+                                  : borderColor,
+                              width: highlighted ? 1.4 : 1,
                             ),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.arrow_drop_down_rounded, size: 16),
-                          ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                highlighted ? '放到$label' : label,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: foregroundColor,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isActive
+                                      ? scheme.primary.withValues(alpha: 0.12)
+                                      : scheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  '$count',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: foregroundColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     );
                   },
-                  menuChildren: [
-                    MenuItemButton(
-                      onPressed: () => onRenameScene(scene),
-                      leadingIcon: const Icon(Icons.edit_outlined),
-                      child: const Text('重命名场'),
-                    ),
-                    MenuItemButton(
-                      onPressed: () => onToggleNumberMode(
-                        scene,
-                        scene.numberMode != StoryboardSceneNumberMode.manual,
-                      ),
-                      leadingIcon: const Icon(Icons.tag_outlined),
-                      child: Text(
-                        scene.numberMode == StoryboardSceneNumberMode.manual
-                            ? '恢复自动场号'
-                            : '切换为手动场号',
-                      ),
-                    ),
-                    MenuItemButton(
-                      onPressed: () => onEditManualNumber(scene),
-                      leadingIcon: const Icon(Icons.pin_outlined),
-                      child: const Text('设置手动场号'),
-                    ),
-                    MenuItemButton(
-                      onPressed: isEmpty ? () => onDeleteScene(scene) : null,
-                      leadingIcon: const Icon(Icons.delete_outline_rounded),
-                      child: Text(isEmpty ? '删除空场' : '仅空场可删除'),
-                    ),
-                  ],
                 );
               },
             ),
@@ -1794,6 +2124,559 @@ class _SceneStrip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+}
+
+class _SceneWorkspace extends StatefulWidget {
+  const _SceneWorkspace({
+    required this.scenes,
+    required this.shots,
+    required this.showSceneHeaders,
+    required this.activeSceneId,
+    required this.onSelectScene,
+    required this.onMoveShotToScene,
+    required this.onRenameScene,
+    required this.onToggleNumberMode,
+    required this.onEditManualNumber,
+    required this.onDeleteScene,
+    required this.onReorderScene,
+    required this.sceneTableBuilder,
+  });
+
+  final List<StoryboardScene> scenes;
+  final List<ShotRecord> shots;
+  final bool showSceneHeaders;
+  final String? activeSceneId;
+  final ValueChanged<String> onSelectScene;
+  final Future<void> Function(String shotId, String targetSceneId, int? targetIndex)
+  onMoveShotToScene;
+  final Future<void> Function(StoryboardScene scene) onRenameScene;
+  final Future<void> Function(StoryboardScene scene, bool useManual)
+  onToggleNumberMode;
+  final Future<void> Function(StoryboardScene scene) onEditManualNumber;
+  final Future<void> Function(StoryboardScene scene) onDeleteScene;
+  final Future<void> Function(String draggedSceneId, int targetIndex)
+  onReorderScene;
+  final Widget Function(String sceneId, List<ShotRecord> sceneShots)
+  sceneTableBuilder;
+
+  @override
+  State<_SceneWorkspace> createState() => _SceneWorkspaceState();
+}
+
+class _SceneWorkspaceState extends State<_SceneWorkspace> {
+  final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _sceneKeys = <String, GlobalKey>{};
+
+  GlobalKey _sceneKey(String sceneId) =>
+      _sceneKeys.putIfAbsent(sceneId, GlobalKey.new);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActiveScene());
+  }
+
+  @override
+  void didUpdateWidget(covariant _SceneWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeSceneId != widget.activeSceneId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActiveScene());
+    }
+  }
+
+  void _scrollToActiveScene() {
+    final activeSceneId = widget.activeSceneId;
+    if (activeSceneId == null || !_scrollController.hasClients) {
+      return;
+    }
+    final key = _sceneKeys[activeSceneId];
+    final context = key?.currentContext;
+    if (context == null) {
+      return;
+    }
+    Scrollable.ensureVisible(
+      context,
+      alignment: 0.04,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final orderedScenes = [...widget.scenes]
+      ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final orderedShots = [...widget.shots]
+      ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    final shotsByScene = <String, List<ShotRecord>>{
+      for (final scene in orderedScenes) scene.id: <ShotRecord>[],
+    };
+    for (final shot in orderedShots) {
+      shotsByScene.putIfAbsent(shot.sceneId, () => <ShotRecord>[]).add(shot);
+    }
+
+    if (!widget.showSceneHeaders && orderedScenes.length == 1) {
+      final scene = orderedScenes.first;
+      final sceneShots = shotsByScene[scene.id] ?? const <ShotRecord>[];
+      return sceneShots.isEmpty
+          ? _EmptySceneDropZone(
+              onSelect: () => widget.onSelectScene(scene.id),
+              highlighted: false,
+            )
+          : widget.sceneTableBuilder(scene.id, sceneShots);
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.only(bottom: 16),
+      itemCount: orderedScenes.length * 2 + 1,
+      itemBuilder: (context, index) {
+        if (index.isEven) {
+          return _SceneReorderDropTarget(
+            targetIndex: index ~/ 2,
+            onAcceptScene: widget.onReorderScene,
+          );
+        }
+        final sceneIndex = index ~/ 2;
+        final scene = orderedScenes[sceneIndex];
+        final sceneShots = shotsByScene[scene.id] ?? const <ShotRecord>[];
+        return KeyedSubtree(
+          key: _sceneKey(scene.id),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _SceneWorkspaceBlock(
+              scene: scene,
+              autoNumber: sceneIndex + 1,
+              showHeader: widget.showSceneHeaders,
+              isActive: widget.activeSceneId == scene.id,
+              shotCount: sceneShots.length,
+              shots: sceneShots,
+              onSelect: () => widget.onSelectScene(scene.id),
+              onMoveShotToScene: (shotId) => widget.onMoveShotToScene(
+                shotId,
+                scene.id,
+                sceneShots.length,
+              ),
+              onRenameScene: () => widget.onRenameScene(scene),
+              onToggleNumberMode: () => widget.onToggleNumberMode(
+                scene,
+                scene.numberMode != StoryboardSceneNumberMode.manual,
+              ),
+              onEditManualNumber: () => widget.onEditManualNumber(scene),
+              onDeleteScene: sceneShots.isEmpty
+                  ? () => widget.onDeleteScene(scene)
+                  : null,
+              child: widget.sceneTableBuilder(scene.id, sceneShots),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SceneReorderDropTarget extends StatelessWidget {
+  const _SceneReorderDropTarget({
+    required this.targetIndex,
+    required this.onAcceptScene,
+  });
+
+  final int targetIndex;
+  final Future<void> Function(String draggedSceneId, int targetIndex)
+  onAcceptScene;
+
+  @override
+  Widget build(BuildContext context) {
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          _extractSceneDragId(details.data) != null,
+      onAcceptWithDetails: (details) async {
+        final sceneId = _extractSceneDragId(details.data);
+        if (sceneId == null) {
+          return;
+        }
+        await onAcceptScene(sceneId, targetIndex);
+      },
+      builder: (context, candidateData, rejectedData) {
+        final active = candidateData.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          height: active ? 16 : 8,
+          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          decoration: BoxDecoration(
+            color: active
+                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.14)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: active
+              ? Center(
+                  child: Container(
+                    height: 3,
+                    margin: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                )
+              : null,
+        );
+      },
+    );
+  }
+}
+
+class _SceneWorkspaceBlock extends StatelessWidget {
+  const _SceneWorkspaceBlock({
+    required this.scene,
+    required this.autoNumber,
+    required this.showHeader,
+    required this.isActive,
+    required this.shotCount,
+    required this.shots,
+    required this.onSelect,
+    required this.onMoveShotToScene,
+    required this.onRenameScene,
+    required this.onToggleNumberMode,
+    required this.onEditManualNumber,
+    required this.onDeleteScene,
+    required this.child,
+  });
+
+  final StoryboardScene scene;
+  final int autoNumber;
+  final bool showHeader;
+  final bool isActive;
+  final int shotCount;
+  final List<ShotRecord> shots;
+  final VoidCallback onSelect;
+  final Future<void> Function(String shotId) onMoveShotToScene;
+  final Future<void> Function() onRenameScene;
+  final Future<void> Function() onToggleNumberMode;
+  final Future<void> Function() onEditManualNumber;
+  final Future<void> Function()? onDeleteScene;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final sceneNumber = scene.displayNumber(autoNumber);
+    final title = scene.name.trim().isEmpty
+        ? '$sceneNumber场'
+        : '$sceneNumber场  ${scene.name.trim()}';
+    final borderColor = isActive
+        ? scheme.primary.withValues(alpha: 0.55)
+        : theme.dividerColor.withValues(alpha: 0.9);
+
+    if (!showHeader) {
+      return shots.isEmpty
+          ? _EmptySceneDropZone(onSelect: onSelect, highlighted: false)
+          : child;
+    }
+
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          _extractShotDragId(details.data) != null,
+      onAcceptWithDetails: (details) async {
+        final shotId = _extractShotDragId(details.data);
+        if (shotId == null) {
+          return;
+        }
+        await onMoveShotToScene(shotId);
+      },
+      builder: (context, candidateData, rejectedData) {
+        final highlighted = candidateData.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            color: highlighted
+                ? scheme.primaryContainer.withValues(alpha: 0.2)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: highlighted
+                  ? scheme.primary.withValues(alpha: 0.85)
+                  : borderColor,
+              width: highlighted ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              InkWell(
+                onTap: onSelect,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? scheme.primaryContainer.withValues(alpha: 0.72)
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(12),
+                    ),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: borderColor.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Draggable<String>(
+                        data: _sceneDragData(scene.id),
+                        maxSimultaneousDrags: 1,
+                        feedback: Material(
+                          color: Colors.transparent,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: scheme.surface,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: scheme.primary),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.12),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Text(
+                                title,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.grab,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: scheme.surface,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: theme.dividerColor.withValues(alpha: 0.9),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.drag_indicator_rounded,
+                              size: 18,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                title,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            PopupMenuButton<_SceneBlockAction>(
+                              tooltip: '场操作',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 172,
+                                maxWidth: 220,
+                              ),
+                              onSelected: (action) async {
+                                switch (action) {
+                                  case _SceneBlockAction.rename:
+                                    await onRenameScene();
+                                  case _SceneBlockAction.toggleNumberMode:
+                                    await onToggleNumberMode();
+                                  case _SceneBlockAction.editManualNumber:
+                                    await onEditManualNumber();
+                                  case _SceneBlockAction.deleteScene:
+                                    if (onDeleteScene != null) {
+                                      await onDeleteScene!();
+                                    }
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: _SceneBlockAction.rename,
+                                  child: SizedBox(
+                                    width: 140,
+                                    child: Text('重命名场'),
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: _SceneBlockAction.toggleNumberMode,
+                                  child: SizedBox(
+                                    width: 140,
+                                    child: Text(
+                                      scene.numberMode ==
+                                              StoryboardSceneNumberMode.manual
+                                          ? '恢复自动场号'
+                                          : '切换为手动场号',
+                                    ),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: _SceneBlockAction.editManualNumber,
+                                  child: SizedBox(
+                                    width: 140,
+                                    child: Text('设置手动场号'),
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: _SceneBlockAction.deleteScene,
+                                  enabled: onDeleteScene != null,
+                                  child: SizedBox(
+                                    width: 140,
+                                    child: Text(
+                                      onDeleteScene != null
+                                          ? '删除空场'
+                                          : '仅空场可删除',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: scheme.surface,
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: theme.dividerColor.withValues(
+                                      alpha: 0.9,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.tune_rounded,
+                                      size: 14,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '场菜单',
+                                      style: theme.textTheme.labelMedium,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isActive
+                              ? scheme.primary.withValues(alpha: 0.12)
+                              : scheme.surface,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$shotCount 镜',
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: shots.isEmpty
+                    ? (isActive || highlighted
+                          ? _EmptySceneDropZone(
+                              onSelect: onSelect,
+                              highlighted: highlighted,
+                            )
+                          : const SizedBox(height: 2))
+                    : child,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _EmptySceneDropZone extends StatelessWidget {
+  const _EmptySceneDropZone({
+    required this.onSelect,
+    required this.highlighted,
+  });
+
+  final VoidCallback onSelect;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return InkWell(
+      onTap: onSelect,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: highlighted ? 88 : 56,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: highlighted
+              ? scheme.primaryContainer.withValues(alpha: 0.28)
+              : scheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: highlighted
+                ? scheme.primary.withValues(alpha: 0.8)
+                : theme.dividerColor.withValues(alpha: 0.9),
+            style: BorderStyle.solid,
+          ),
+        ),
+        child: Text(
+          highlighted ? '松手放到这个场' : '空场，拖镜头到这里或点击后新建镜头',
+          style: theme.textTheme.bodyMedium,
+        ),
       ),
     );
   }
@@ -1828,15 +2711,17 @@ class _ToolbarPillButton extends StatelessWidget {
     required this.icon,
     required this.label,
     this.onPressed,
+    this.forceEnabledAppearance = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
+  final bool forceEnabledAppearance;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = onPressed != null;
+    final enabled = forceEnabledAppearance || onPressed != null;
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final borderColor = enabled
@@ -1923,6 +2808,13 @@ class _SideSheet extends StatelessWidget {
 }
 
 enum _SelectionAction { selectAll, invert, clear }
+
+enum _SceneBlockAction {
+  rename,
+  toggleNumberMode,
+  editManualNumber,
+  deleteScene,
+}
 
 enum _BatchFieldKind { text, number, select }
 

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/bootstrap/providers.dart';
+import '../../../core/history/history_entry.dart';
 import '../../ai_storyboard/domain/ai_shot_draft.dart';
 import '../domain/models/asset_ref.dart';
 import '../domain/models/board_preset.dart';
@@ -111,6 +112,137 @@ class ProjectWorkspaceController
     state = state.copyWith(
       shots: nextShots,
       storyboardRows: _buildStoryboardRows(state.scenes, nextShots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> reorderShotIds(List<String> orderedShotIds) async {
+    if (orderedShotIds.isEmpty) {
+      return;
+    }
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    await repo.reorderShots(arg, orderedShotIds);
+    final nextShots = await repo.loadShots(arg);
+    state = state.copyWith(
+      shots: nextShots,
+      storyboardRows: _buildStoryboardRows(state.scenes, nextShots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> applySceneShotStructure({
+    required List<String> orderedSceneIds,
+    required Map<String, List<String>> orderedShotIdsByScene,
+  }) async {
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    await repo.applySceneShotStructure(
+      projectId: arg,
+      orderedSceneIds: orderedSceneIds,
+      orderedShotIdsByScene: orderedShotIdsByScene,
+    );
+    final scenes = await repo.loadScenes(arg);
+    final shots = await repo.loadShots(arg);
+    state = state.copyWith(
+      scenes: scenes,
+      shots: shots,
+      storyboardRows: _buildStoryboardRows(scenes, shots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> moveShotToScene({
+    required String shotId,
+    required String targetSceneId,
+    int? targetIndex,
+  }) async {
+    final orderedScenes = [...state.scenes]
+      ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final orderedSceneIds = orderedScenes.map((scene) => scene.id).toList();
+    final orderedShotIdsByScene = <String, List<String>>{
+      for (final scene in orderedScenes) scene.id: <String>[],
+    };
+
+    ShotRecord? movingShot;
+    for (final shot in [...state.shots]..sort((a, b) => a.orderIndex.compareTo(b.orderIndex))) {
+      if (shot.id == shotId) {
+        movingShot = shot;
+        continue;
+      }
+      orderedShotIdsByScene.putIfAbsent(shot.sceneId, () => <String>[]).add(shot.id);
+    }
+
+    if (movingShot == null) {
+      return;
+    }
+
+    final targetShots = orderedShotIdsByScene.putIfAbsent(
+      targetSceneId,
+      () => <String>[],
+    );
+    final safeTargetIndex = (targetIndex ?? targetShots.length).clamp(
+      0,
+      targetShots.length,
+    );
+    targetShots.insert(safeTargetIndex, movingShot.id);
+
+    await applySceneShotStructureWithHistory(
+      orderedSceneIds: orderedSceneIds,
+      orderedShotIdsByScene: orderedShotIdsByScene,
+    );
+  }
+
+  Future<void> applySceneShotStructureWithHistory({
+    required List<String> orderedSceneIds,
+    required Map<String, List<String>> orderedShotIdsByScene,
+  }) async {
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final previousScenes = await repo.loadScenes(arg);
+    final previousOrderedSceneIds = [
+      ...previousScenes
+        ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex)),
+    ].map((scene) => scene.id).toList();
+    final previousShots = await repo.loadShots(arg);
+    final previousOrderedShotIdsByScene = <String, List<String>>{
+      for (final sceneId in previousOrderedSceneIds) sceneId: <String>[],
+    };
+    for (final shot in [...previousShots]..sort((a, b) => a.orderIndex.compareTo(b.orderIndex))) {
+      previousOrderedShotIdsByScene.putIfAbsent(shot.sceneId, () => <String>[]).add(shot.id);
+    }
+
+    final historyManager = ref.read(historyManagerProvider);
+
+    await repo.applySceneShotStructure(
+      projectId: arg,
+      orderedSceneIds: orderedSceneIds,
+      orderedShotIdsByScene: orderedShotIdsByScene,
+    );
+
+    historyManager.record(
+      HistoryEntry(
+        label: 'ApplySceneShotStructure',
+        createdAt: DateTime.now(),
+        undo: () => repo.applySceneShotStructure(
+          projectId: arg,
+          orderedSceneIds: previousOrderedSceneIds,
+          orderedShotIdsByScene: previousOrderedShotIdsByScene,
+        ),
+        redo: () => repo.applySceneShotStructure(
+          projectId: arg,
+          orderedSceneIds: orderedSceneIds,
+          orderedShotIdsByScene: orderedShotIdsByScene,
+        ),
+      ),
+    );
+
+    final scenes = await repo.loadScenes(arg);
+    final shots = await repo.loadShots(arg);
+    state = state.copyWith(
+      scenes: scenes,
+      shots: shots,
+      storyboardRows: _buildStoryboardRows(scenes, shots),
       isLoading: false,
       clearError: true,
     );
@@ -307,8 +439,11 @@ class ProjectWorkspaceController
     );
   }
 
-  Future<void> createScene({required int insertIndex, String name = ''}) async {
-    await ref
+  Future<StoryboardScene> createScene({
+    required int insertIndex,
+    String name = '',
+  }) async {
+    final scene = await ref
         .read(workspaceCommandServiceProvider)
         .createScene(projectId: arg, insertIndex: insertIndex, name: name);
     final repo = ref.read(projectWorkspaceRepositoryProvider);
@@ -319,6 +454,7 @@ class ProjectWorkspaceController
       isLoading: false,
       clearError: true,
     );
+    return scene;
   }
 
   Future<void> updateScene(StoryboardScene scene) async {
@@ -339,6 +475,20 @@ class ProjectWorkspaceController
     await ref
         .read(workspaceCommandServiceProvider)
         .deleteEmptyScene(projectId: arg, sceneId: sceneId);
+    final repo = ref.read(projectWorkspaceRepositoryProvider);
+    final scenes = await repo.loadScenes(arg);
+    state = state.copyWith(
+      scenes: scenes,
+      storyboardRows: _buildStoryboardRows(scenes, state.shots),
+      isLoading: false,
+      clearError: true,
+    );
+  }
+
+  Future<void> reorderScenes(List<String> orderedSceneIds) async {
+    await ref
+        .read(workspaceCommandServiceProvider)
+        .reorderScenes(projectId: arg, orderedSceneIds: orderedSceneIds);
     final repo = ref.read(projectWorkspaceRepositoryProvider);
     final scenes = await repo.loadScenes(arg);
     state = state.copyWith(
