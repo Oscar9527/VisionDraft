@@ -69,15 +69,59 @@ Future<void> main() async {
 }
 
 (String, String) _resolvePaths() {
+  final override = Platform.environment['VISIONDRAFT_INDEX_DB'];
+  if (override != null && override.isNotEmpty) {
+    final indexFile = File(override);
+    return (
+      indexFile.path,
+      indexFile.parent.path,
+    );
+  }
+
   final appData =
       Platform.environment['APPDATA'] ?? Platform.environment['AppData'];
   if (appData == null || appData.isEmpty) {
     throw StateError('APPDATA is not available in the environment.');
   }
-  final root =
-      '$appData${Platform.pathSeparator}com.visiondraft${Platform.pathSeparator}vision_draft${Platform.pathSeparator}visiondraft';
-  return (
-    '$root${Platform.pathSeparator}visiondraft_index.db',
-    '$root${Platform.pathSeparator}projects',
+
+  final candidates = <Directory>[
+    Directory(
+      '$appData${Platform.pathSeparator}com.visiondraft${Platform.pathSeparator}VisionDraft${Platform.pathSeparator}visiondraft',
+    ),
+    Directory(
+      '$appData${Platform.pathSeparator}com.visiondraft${Platform.pathSeparator}vision_draft${Platform.pathSeparator}visiondraft',
+    ),
+  ];
+
+  for (final root in candidates) {
+    final indexFile = File(
+      '${root.path}${Platform.pathSeparator}visiondraft_index.db',
+    );
+    if (indexFile.existsSync()) {
+      return (
+        indexFile.path,
+        root.path,
+      );
+    }
+  }
+
+  final appRoot = Directory(
+    '$appData${Platform.pathSeparator}com.visiondraft',
   );
+  if (appRoot.existsSync()) {
+    final matches = appRoot
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('visiondraft_index.db'))
+        .toList();
+    if (matches.isNotEmpty) {
+      final indexFile = matches.first;
+      return (
+        indexFile.path,
+        indexFile.parent.path,
+      );
+    }
+  }
+
+  throw StateError('Unable to locate visiondraft_index.db under $appData');
 }
