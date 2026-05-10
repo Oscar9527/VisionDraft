@@ -137,38 +137,41 @@ class PdfExportService {
       pw.Page(
         pageFormat: PdfPageFormat.a4.landscape,
         margin: layout.margin,
-        build: (context) => pw.SizedBox(
-          width: layout.contentWidth,
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              _pdfHeader(
-                title: _titleForType(payload.documentType),
-                projectName: payload.bundle.name,
-                payload: payload,
-                brandingLogo: brandingLogo,
-                scale: layout.headerScale,
-              ),
-              pw.SizedBox(height: layout.headerSpacing),
-              pw.Align(
-                alignment: pw.Alignment.topCenter,
-                child: pw.SizedBox(
-                  width: layout.tableWidth,
-                  child: pw.Table(
-                    border: _shotSheetTableBorder(),
-                    defaultVerticalAlignment:
-                        pw.TableCellVerticalAlignment.middle,
-                    columnWidths: {
-                      for (var index = 0; index < visibleFields.length; index++)
-                        index: pw.FixedColumnWidth(
-                          layout.columnWidths[visibleFields[index]]!,
-                        ),
-                    },
-                    children: tableRows,
+        build: (context) => pw.Align(
+          alignment: pw.Alignment.topCenter,
+          child: pw.SizedBox(
+            width: layout.contentWidth,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                _pdfHeader(
+                  title: _titleForType(payload.documentType),
+                  projectName: payload.bundle.name,
+                  payload: payload,
+                  brandingLogo: brandingLogo,
+                  scale: layout.headerScale,
+                ),
+                pw.SizedBox(height: layout.headerSpacing),
+                pw.Align(
+                  alignment: pw.Alignment.topCenter,
+                  child: pw.SizedBox(
+                    width: layout.tableWidth,
+                    child: pw.Table(
+                      border: _shotSheetTableBorder(),
+                      defaultVerticalAlignment:
+                          pw.TableCellVerticalAlignment.middle,
+                      columnWidths: {
+                        for (var index = 0; index < visibleFields.length; index++)
+                          index: pw.FixedColumnWidth(
+                            layout.columnWidths[visibleFields[index]]!,
+                          ),
+                      },
+                      children: tableRows,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -654,16 +657,24 @@ class PdfExportService {
     required double rowHeight,
     double fontSize = 8.6,
   }) {
+    final safeRowHeight = math.max(rowHeight, fontSize + 8);
+    final verticalPadding = _clampDouble(
+      (safeRowHeight - fontSize) / 2 - 0.4,
+      2.0,
+      5.0,
+    );
+    final horizontalPadding = _clampDouble(fontSize * 0.55, 3.6, 6.0);
+
     return pw.TableRow(
       decoration: const pw.BoxDecoration(color: PdfColors.grey300),
       children: values
           .map(
             (value) => pw.Container(
-              height: rowHeight,
+              height: safeRowHeight,
               alignment: pw.Alignment.centerLeft,
-              padding: const pw.EdgeInsets.symmetric(
-                horizontal: 5,
-                vertical: 5,
+              padding: pw.EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+                vertical: verticalPadding,
               ),
               child: pw.Text(
                 value,
@@ -892,10 +903,9 @@ class PdfExportService {
     final headerScaleBias = math.pow(editorScale, 0.12).toDouble();
     final boardTextBias =
         payload.boardPreset.textScaleMode == TextScaleMode.large ? 1.08 : 0.96;
-    final availableWidth =
-        PdfPageFormat.a4.landscape.availableWidth - margin.left - margin.right;
-    final availableHeight =
-        PdfPageFormat.a4.landscape.availableHeight - margin.top - margin.bottom;
+    final pageFormat = PdfPageFormat.a4.landscape;
+    final availableWidth = pageFormat.width - margin.left - margin.right;
+    final availableHeight = pageFormat.height - margin.top - margin.bottom;
     final rowCount = math.max(payload.shots.length, 1);
     final desiredColumnWidthTotal = visibleFields.fold<double>(
       0,
@@ -928,7 +938,10 @@ class PdfExportService {
       for (final shot in payload.shots)
         shot.id: math.max(1.0, rowHeights[shot.id] ?? 1.0) * rowFitScale,
     };
-    final headerRowHeight = desiredHeaderRowHeight * rowFitScale;
+    final headerRowHeight = math.max(
+      hasImage ? 18.0 : 16.0,
+      desiredHeaderRowHeight * rowFitScale,
+    );
     final tableWidth = desiredColumnWidthTotal * columnFitScale;
     final averageRowHeight = normalizedRowHeights.isEmpty
         ? (hasImage ? 42.0 : 30.0)
