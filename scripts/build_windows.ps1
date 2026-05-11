@@ -32,7 +32,7 @@ function Remove-UnsupportedWindowsPluginReferences {
     $registrantContent = Get-Content $registrantPath -Raw
     $updatedRegistrantContent = $registrantContent `
       -replace '(?m)^#include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin\.h>\r?\n', '' `
-      -replace "(?ms)\s*FlutterSecureStorageWindowsPluginRegisterWithRegistrar\(\r?\n\s*registry->GetRegistrarForPlugin\(\""FlutterSecureStorageWindowsPlugin\""\)\);\r?\n", ""
+      -replace "(?ms)\n\s*FlutterSecureStorageWindowsPluginRegisterWithRegistrar\(\r?\n\s*registry->GetRegistrarForPlugin\(\""FlutterSecureStorageWindowsPlugin\""\)\);\r?\n", "`n"
     if ($updatedRegistrantContent -ne $registrantContent) {
       Set-Content -Path $registrantPath -Value $updatedRegistrantContent -Encoding UTF8
     }

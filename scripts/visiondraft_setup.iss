@@ -1,5 +1,5 @@
 #define MyAppName "VisionDraft"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "Oscar9527"
 #define MyAppURL "https://github.com/Oscar9527/VisionDraft"
 #define MyAppExeName "vision_draft.exe"
@@ -22,7 +22,7 @@ LicenseFile=
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#SourcePath}\..\dist
-OutputBaseFilename=VisionDraft-Setup-v0.2.0
+OutputBaseFilename=VisionDraft-Setup-v0.2.1
 SetupIconFile={#SourcePath}\..\windows\runner\resources\app_icon.ico
 Compression=lzma
 SolidCompression=yes
