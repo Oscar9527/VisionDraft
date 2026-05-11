@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 class MediaImportService {
   const MediaImportService();
@@ -48,6 +50,21 @@ class MediaImportService {
       confirmButtonText: '选择项目包',
     );
     return file?.path;
+  }
+
+  Future<String?> pickExportDirectory() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final directory = await getApplicationDocumentsDirectory();
+      final exportDir = Directory(p.join(directory.path, 'VisionDraft', 'Exports'));
+      await exportDir.create(recursive: true);
+      return exportDir.path;
+    }
+
+    final directory = await getDirectoryPath(
+      confirmButtonText: '选择导出位置',
+      canCreateDirectories: true,
+    );
+    return directory;
   }
 
   Future<File?> fileFromPath(String path) async {

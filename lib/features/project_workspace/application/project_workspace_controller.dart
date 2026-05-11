@@ -153,28 +153,36 @@ class ProjectWorkspaceController
     );
   }
 
-  Future<void> moveShotToScene({
-    required String shotId,
+  Future<void> moveShotsToScene({
+    required List<String> shotIds,
     required String targetSceneId,
     int? targetIndex,
   }) async {
+    if (shotIds.isEmpty) {
+      return;
+    }
+    final movingShotIdSet = shotIds.toSet();
+    final orderedShots = [...state.shots]
+      ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
     final orderedScenes = [...state.scenes]
       ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
     final orderedSceneIds = orderedScenes.map((scene) => scene.id).toList();
     final orderedShotIdsByScene = <String, List<String>>{
       for (final scene in orderedScenes) scene.id: <String>[],
     };
-
-    ShotRecord? movingShot;
-    for (final shot in [...state.shots]..sort((a, b) => a.orderIndex.compareTo(b.orderIndex))) {
-      if (shot.id == shotId) {
-        movingShot = shot;
+    for (final shot in orderedShots) {
+      if (movingShotIdSet.contains(shot.id)) {
         continue;
       }
-      orderedShotIdsByScene.putIfAbsent(shot.sceneId, () => <String>[]).add(shot.id);
+      orderedShotIdsByScene
+          .putIfAbsent(shot.sceneId, () => <String>[])
+          .add(shot.id);
     }
-
-    if (movingShot == null) {
+    final movingShots = [
+      for (final shot in orderedShots)
+        if (movingShotIdSet.contains(shot.id)) shot,
+    ];
+    if (movingShots.isEmpty) {
       return;
     }
 
@@ -182,15 +190,37 @@ class ProjectWorkspaceController
       targetSceneId,
       () => <String>[],
     );
-    final safeTargetIndex = (targetIndex ?? targetShots.length).clamp(
+    final originalTargetShotIds = [
+      for (final shot in orderedShots)
+        if (shot.sceneId == targetSceneId) shot.id,
+    ];
+    final originalTargetIndex = (targetIndex ?? originalTargetShotIds.length)
+        .clamp(0, originalTargetShotIds.length);
+    final removedBeforeTarget = originalTargetShotIds
+        .take(originalTargetIndex)
+        .where(movingShotIdSet.contains)
+        .length;
+    final safeTargetIndex = (originalTargetIndex - removedBeforeTarget).clamp(
       0,
       targetShots.length,
     );
-    targetShots.insert(safeTargetIndex, movingShot.id);
+    targetShots.insertAll(safeTargetIndex, movingShots.map((shot) => shot.id));
 
     await applySceneShotStructureWithHistory(
       orderedSceneIds: orderedSceneIds,
       orderedShotIdsByScene: orderedShotIdsByScene,
+    );
+  }
+
+  Future<void> moveShotToScene({
+    required String shotId,
+    required String targetSceneId,
+    int? targetIndex,
+  }) {
+    return moveShotsToScene(
+      shotIds: [shotId],
+      targetSceneId: targetSceneId,
+      targetIndex: targetIndex,
     );
   }
 
@@ -201,15 +231,18 @@ class ProjectWorkspaceController
     final repo = ref.read(projectWorkspaceRepositoryProvider);
     final previousScenes = await repo.loadScenes(arg);
     final previousOrderedSceneIds = [
-      ...previousScenes
-        ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex)),
+      ...previousScenes..sort((a, b) => a.sortIndex.compareTo(b.sortIndex)),
     ].map((scene) => scene.id).toList();
     final previousShots = await repo.loadShots(arg);
     final previousOrderedShotIdsByScene = <String, List<String>>{
       for (final sceneId in previousOrderedSceneIds) sceneId: <String>[],
     };
-    for (final shot in [...previousShots]..sort((a, b) => a.orderIndex.compareTo(b.orderIndex))) {
-      previousOrderedShotIdsByScene.putIfAbsent(shot.sceneId, () => <String>[]).add(shot.id);
+    for (final shot in [
+      ...previousShots,
+    ]..sort((a, b) => a.orderIndex.compareTo(b.orderIndex))) {
+      previousOrderedShotIdsByScene
+          .putIfAbsent(shot.sceneId, () => <String>[])
+          .add(shot.id);
     }
 
     final historyManager = ref.read(historyManagerProvider);
@@ -272,7 +305,10 @@ class ProjectWorkspaceController
         : state.customColumns;
     state = state.copyWith(
       shots: _replaceShot(updatedShot),
-      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShot(updatedShot)),
+      storyboardRows: _buildStoryboardRows(
+        state.scenes,
+        _replaceShot(updatedShot),
+      ),
       fixedFieldCustomOptions: fixedFieldCustomOptions,
       customColumns: customColumns,
       isLoading: false,
@@ -299,7 +335,10 @@ class ProjectWorkspaceController
     final updatedShot = await repo.loadShot(arg, shotId);
     state = state.copyWith(
       shots: _replaceShot(updatedShot),
-      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShot(updatedShot)),
+      storyboardRows: _buildStoryboardRows(
+        state.scenes,
+        _replaceShot(updatedShot),
+      ),
       isLoading: false,
       clearError: true,
     );
@@ -322,7 +361,10 @@ class ProjectWorkspaceController
     final updatedShot = await repo.loadShot(arg, shotId);
     state = state.copyWith(
       shots: _replaceShot(updatedShot),
-      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShot(updatedShot)),
+      storyboardRows: _buildStoryboardRows(
+        state.scenes,
+        _replaceShot(updatedShot),
+      ),
       isLoading: false,
       clearError: true,
     );
@@ -431,7 +473,10 @@ class ProjectWorkspaceController
         : state.customColumns;
     state = state.copyWith(
       shots: _replaceShots(updatedShots),
-      storyboardRows: _buildStoryboardRows(state.scenes, _replaceShots(updatedShots)),
+      storyboardRows: _buildStoryboardRows(
+        state.scenes,
+        _replaceShots(updatedShots),
+      ),
       fixedFieldCustomOptions: fixedFieldCustomOptions,
       customColumns: customColumns,
       isLoading: false,
@@ -510,7 +555,8 @@ class ProjectWorkspaceController
     for (final shot in shots) {
       shotsByScene.putIfAbsent(shot.sceneId, () => <ShotRecord>[]).add(shot);
     }
-    final orderedScenes = [...scenes]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final orderedScenes = [...scenes]
+      ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
     final hideSingleDefaultScene =
         orderedScenes.length == 1 &&
         orderedScenes.first.name.trim().isEmpty &&

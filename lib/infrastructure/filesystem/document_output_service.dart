@@ -20,6 +20,48 @@ class SavedDocumentResult {
 class DocumentOutputService {
   const DocumentOutputService();
 
+  Future<Directory> _resolveAndroidTempExportDirectory() async {
+    final support = await getApplicationSupportDirectory();
+    final exportDir = Directory(
+      p.join(support.path, 'visiondraft', 'temp_exports'),
+    );
+    await exportDir.create(recursive: true);
+    return exportDir;
+  }
+
+  Future<Directory> _resolveAndroidSaveDirectory() async {
+    final downloads = await getDownloadsDirectory();
+    if (downloads != null) {
+      final exportDir = Directory(p.join(downloads.path, 'VisionDraft'));
+      await exportDir.create(recursive: true);
+      return exportDir;
+    }
+    return _resolveAndroidTempExportDirectory();
+  }
+
+  Future<File> _writeUniqueFile(
+    Directory directory,
+    String filename,
+    List<int> bytes,
+  ) async {
+    final sanitizedName = filename.trim().isEmpty ? 'visiondraft.bin' : filename;
+    final extension = p.extension(sanitizedName);
+    final basename = p.basenameWithoutExtension(sanitizedName);
+
+    var candidate = File(p.join(directory.path, sanitizedName));
+    var suffix = 2;
+    while (await candidate.exists()) {
+      candidate = File(
+        p.join(directory.path, '$basename-$suffix$extension'),
+      );
+      suffix += 1;
+    }
+
+    await candidate.parent.create(recursive: true);
+    await candidate.writeAsBytes(bytes, flush: true);
+    return candidate;
+  }
+
   Future<SavedDocumentResult?> saveDocument({
     required List<int> bytes,
     required String filename,
@@ -28,11 +70,8 @@ class DocumentOutputService {
     required String confirmButtonText,
   }) async {
     if (defaultTargetPlatform == TargetPlatform.android) {
-      final directory = await getTemporaryDirectory();
-      final exportDir = Directory(p.join(directory.path, 'visiondraft_exports'));
-      await exportDir.create(recursive: true);
-      final file = File(p.join(exportDir.path, filename));
-      await file.writeAsBytes(bytes, flush: true);
+      final exportDir = await _resolveAndroidSaveDirectory();
+      final file = await _writeUniqueFile(exportDir, filename, bytes);
       return SavedDocumentResult(file: file, shared: false);
     }
 
@@ -58,11 +97,14 @@ class DocumentOutputService {
     String? subject,
     String? text,
   }) async {
-    final directory = await getTemporaryDirectory();
-    final exportDir = Directory(p.join(directory.path, 'visiondraft_exports'));
-    await exportDir.create(recursive: true);
-    final file = File(p.join(exportDir.path, filename));
-    await file.writeAsBytes(bytes, flush: true);
+    final exportDir = defaultTargetPlatform == TargetPlatform.android
+        ? await _resolveAndroidTempExportDirectory()
+        : await getTemporaryDirectory().then(
+            (directory) => Directory(
+              p.join(directory.path, 'visiondraft_exports'),
+            )..createSync(recursive: true),
+          );
+    final file = await _writeUniqueFile(exportDir, filename, bytes);
     await SharePlus.instance.share(
       ShareParams(
         files: [XFile(file.path)],

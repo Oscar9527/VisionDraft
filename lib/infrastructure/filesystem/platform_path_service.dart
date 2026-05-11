@@ -13,7 +13,7 @@ class PlatformPathService {
   }) async {
     if (defaultTargetPlatform == TargetPlatform.android) {
       final directory = await getApplicationDocumentsDirectory();
-      final root = Directory(p.join(directory.path, 'VisionDraftProjects'));
+      final root = Directory(p.join(directory.path, 'VisionDraft', 'Projects'));
       await root.create(recursive: true);
       return root.path;
     }

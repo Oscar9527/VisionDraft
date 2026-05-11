@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,6 +44,18 @@ String? _extractShotDragId(Object? data) {
     return null;
   }
   return data.substring(_shotDragPrefix.length);
+}
+
+List<String> _extractShotDragIds(Object? data) {
+  final single = _extractShotDragId(data);
+  if (single == null) {
+    return const <String>[];
+  }
+  return single
+      .split(',')
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
 }
 
 class StoryboardEditorPage extends ConsumerStatefulWidget {
@@ -101,7 +113,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             name: name,
             type: type,
             enumSource: enumSource,
-      ),
+          ),
     );
   }
 
@@ -145,7 +157,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
       moved,
     );
 
-    final reorderedSceneIds = reorderedSceneShots.map((shot) => shot.id).toList();
+    final reorderedSceneIds = reorderedSceneShots
+        .map((shot) => shot.id)
+        .toList();
     final nextShotIds = <String>[];
     var insertedSceneShots = false;
 
@@ -167,14 +181,14 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     await controller.reorderShotIds(nextShotIds);
   }
 
-  Future<void> _moveShotToScene(
+  Future<void> _moveShotsToScene(
     ProjectWorkspaceController controller,
-    String shotId,
+    List<String> shotIds,
     String targetSceneId,
     int? targetIndex,
   ) async {
-    await controller.moveShotToScene(
-      shotId: shotId,
+    await controller.moveShotsToScene(
+      shotIds: shotIds,
       targetSceneId: targetSceneId,
       targetIndex: targetIndex,
     );
@@ -185,7 +199,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
       _activeSceneId = targetSceneId;
       _selectedShotIds
         ..clear()
-        ..add(shotId);
+        ..addAll(shotIds);
     });
   }
 
@@ -220,10 +234,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     final safeTargetIndex = targetIndex > sourceIndex
         ? targetIndex - 1
         : targetIndex;
-    sceneIds.insert(
-      safeTargetIndex.clamp(0, sceneIds.length),
-      movedSceneId,
-    );
+    sceneIds.insert(safeTargetIndex.clamp(0, sceneIds.length), movedSceneId);
     await controller.reorderScenes(sceneIds);
     if (!mounted) {
       return;
@@ -268,25 +279,38 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     final hideDefaultSceneChrome = _shouldHideDefaultSceneChrome(
       snapshot.scenes,
     );
-    _activeSceneId ??= snapshot.scenes.isNotEmpty ? snapshot.scenes.first.id : null;
-    final hasActiveScene = snapshot.scenes.any((scene) => scene.id == _activeSceneId);
+    _activeSceneId ??= snapshot.scenes.isNotEmpty
+        ? snapshot.scenes.first.id
+        : null;
+    final hasActiveScene = snapshot.scenes.any(
+      (scene) => scene.id == _activeSceneId,
+    );
     if (!hasActiveScene && snapshot.scenes.isNotEmpty) {
       _activeSceneId = snapshot.scenes.first.id;
     }
     final activeSceneId = _activeSceneId;
     final activeScene = activeSceneId == null
         ? null
-        : snapshot.scenes.where((scene) => scene.id == activeSceneId).firstOrNull;
+        : snapshot.scenes
+              .where((scene) => scene.id == activeSceneId)
+              .firstOrNull;
     final activeSceneLabel = hideDefaultSceneChrome || activeScene == null
         ? null
         : activeScene.name.trim().isEmpty
         ? '${activeScene.displayNumber(activeScene.sortIndex + 1)}场'
         : '${activeScene.displayNumber(activeScene.sortIndex + 1)}场 ${activeScene.name.trim()}';
-    final visibleShots = activeSceneId == null
-        ? snapshot.shots
-        : snapshot.shots.where((shot) => shot.sceneId == activeSceneId).toList()
+    final visibleShots =
+        activeSceneId == null
+              ? snapshot.shots
+              : snapshot.shots
+                    .where((shot) => shot.sceneId == activeSceneId)
+                    .toList()
           ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
     final visibleShotIds = visibleShots.map((shot) => shot.id).toList();
+    final orderedSelectedShotIds = snapshot.shots
+        .where((shot) => _selectedShotIds.contains(shot.id))
+        .map((shot) => shot.id)
+        .toList();
 
     if (snapshot.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -455,15 +479,10 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   selectedShotIds: _selectedShotIds.toList(),
                   currentRowHeights: gridSession.rowHeightsByShotId,
                   zoomPercent: gridSession.zoomPercent,
-                  onApply: (height) =>
-                      gridSessionController.setRowHeights(
-                        _selectedShotIds,
-                        height /
-                            ((gridSession.zoomPercent / 100).clamp(
-                              0.7,
-                              1.5,
-                            )),
-                      ),
+                  onApply: (height) => gridSessionController.setRowHeights(
+                    _selectedShotIds,
+                    height / ((gridSession.zoomPercent / 100).clamp(0.7, 1.5)),
+                  ),
                 ),
           onDeleteSelected: _selectedShotIds.isEmpty
               ? null
@@ -495,16 +514,13 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             onSelectScene: (sceneId) {
               setState(() {
                 _activeSceneId = sceneId;
-                _selectedShotIds.clear();
+                if (!_isBatchMode) {
+                  _selectedShotIds.clear();
+                }
               });
             },
-            onMoveShotToScene: (shotId, targetSceneId) =>
-                _moveShotToScene(
-                  controller,
-                  shotId,
-                  targetSceneId,
-                  null,
-                ),
+            onMoveShotToScene: (shotIds, targetSceneId) =>
+                _moveShotsToScene(controller, shotIds, targetSceneId, null),
             onCreateScene: () async {
               final scene = await controller.createScene(
                 insertIndex: _insertSceneIndex(snapshot.scenes),
@@ -514,7 +530,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
               }
               setState(() {
                 _activeSceneId = scene.id;
-                _selectedShotIds.clear();
+                if (!_isBatchMode) {
+                  _selectedShotIds.clear();
+                }
               });
             },
           ),
@@ -529,13 +547,15 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             onSelectScene: (sceneId) {
               setState(() {
                 _activeSceneId = sceneId;
-                _selectedShotIds.clear();
+                if (!_isBatchMode) {
+                  _selectedShotIds.clear();
+                }
               });
             },
-            onMoveShotToScene: (shotId, targetSceneId, targetIndex) =>
-                _moveShotToScene(
+            onMoveShotToScene: (shotIds, targetSceneId, targetIndex) =>
+                _moveShotsToScene(
                   controller,
-                  shotId,
+                  shotIds,
                   targetSceneId,
                   targetIndex,
                 ),
@@ -607,6 +627,8 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   selectedShotIds: _selectedShotIds.intersection(
                     sceneShots.map((shot) => shot.id).toSet(),
                   ),
+                  dragSelectedShotIdsInOrder: orderedSelectedShotIds,
+                  globalSelectedShotCount: _selectedShotIds.length,
                   zoomPercent: gridSession.zoomPercent,
                   columnWidths: gridSession.columnWidthsByFieldKey,
                   rowHeights: gridSession.rowHeightsByShotId,
@@ -634,45 +656,40 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   onUpdateField: controller.updateShotField,
                   onImportAsset: controller.importAsset,
                   onRelinkAsset: controller.relinkAsset,
-                  onInsertRowAbove: (rowIndex) =>
-                      controller.createShot(
-                        insertIndex: _resolveInsertIndexForVisibleRow(
-                          snapshot.shots,
-                          sceneShots,
-                          rowIndex,
-                          placeBelow: false,
-                        ),
-                        sceneId: sceneId,
-                      ),
-                  onInsertRowBelow: (rowIndex) =>
-                      controller.createShot(
-                        insertIndex: _resolveInsertIndexForVisibleRow(
-                          snapshot.shots,
-                          sceneShots,
-                          rowIndex,
-                          placeBelow: true,
-                        ),
-                        sceneId: sceneId,
-                      ),
+                  onInsertRowAbove: (rowIndex) => controller.createShot(
+                    insertIndex: _resolveInsertIndexForVisibleRow(
+                      snapshot.shots,
+                      sceneShots,
+                      rowIndex,
+                      placeBelow: false,
+                    ),
+                    sceneId: sceneId,
+                  ),
+                  onInsertRowBelow: (rowIndex) => controller.createShot(
+                    insertIndex: _resolveInsertIndexForVisibleRow(
+                      snapshot.shots,
+                      sceneShots,
+                      rowIndex,
+                      placeBelow: true,
+                    ),
+                    sceneId: sceneId,
+                  ),
                   onDeleteRow: controller.deleteShot,
-                  onDropShot: ({required shotId, required targetIndex}) =>
-                      _moveShotToScene(
+                  onDropShot: ({required shotIds, required targetIndex}) =>
+                      _moveShotsToScene(
                         controller,
-                        shotId,
+                        shotIds,
                         sceneId,
                         targetIndex,
                       ),
                   onAddColumn: () async => _showCreateCustomColumnSheet(
                     context,
-                    onSubmit: ({
-                      required name,
-                      required type,
-                      enumSource,
-                    }) => controller.createCustomColumn(
-                      name: name,
-                      type: type,
-                      enumSource: enumSource,
-                    ),
+                    onSubmit: ({required name, required type, enumSource}) =>
+                        controller.createCustomColumn(
+                          name: name,
+                          type: type,
+                          enumSource: enumSource,
+                        ),
                   ),
                   onHideColumn: (fieldKey) async {
                     final nextVisible = snapshot.columnPreset.visibleFieldKeys
@@ -729,11 +746,12 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                     );
                   },
                   onDeleteColumn: controller.deleteCustomColumn,
-                  onDeleteFixedFieldOption: ({required fieldKey, required option}) =>
-                      controller.deleteFixedFieldCustomOption(
-                        fieldKey: fieldKey,
-                        option: option,
-                      ),
+                  onDeleteFixedFieldOption:
+                      ({required fieldKey, required option}) =>
+                          controller.deleteFixedFieldCustomOption(
+                            fieldKey: fieldKey,
+                            option: option,
+                          ),
                   onDeleteCustomColumnOption:
                       ({required columnId, required option}) =>
                           controller.deleteCustomColumnOption(
@@ -1673,9 +1691,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Theme.of(context).dividerColor),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.22,
-                  ),
+              color: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.22),
             ),
             clipBehavior: Clip.antiAlias,
             child: previewPath == null || previewPath.isEmpty
@@ -1766,7 +1784,9 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                             children: [
                               DropdownButtonFormField<String>(
                                 initialValue: shot.sceneId,
-                                decoration: const InputDecoration(labelText: '所属场'),
+                                decoration: const InputDecoration(
+                                  labelText: '所属场',
+                                ),
                                 items: sceneItems
                                     .map(
                                       (scene) => DropdownMenuItem<String>(
@@ -1801,19 +1821,24 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                               ),
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
-                                initialValue: shot.shotSize.isEmpty ? null : shot.shotSize,
-                                decoration: const InputDecoration(labelText: '景别'),
-                                items: fixedFieldOptions(
-                                  ShotFieldKey.shotSize.storageKey,
-                                  customOptionsByFieldKey: fixedOptions,
-                                )
-                                    .map(
-                                      (item) => DropdownMenuItem(
-                                        value: item,
-                                        child: Text(item),
-                                      ),
-                                    )
-                                    .toList(),
+                                initialValue: shot.shotSize.isEmpty
+                                    ? null
+                                    : shot.shotSize,
+                                decoration: const InputDecoration(
+                                  labelText: '景别',
+                                ),
+                                items:
+                                    fixedFieldOptions(
+                                          ShotFieldKey.shotSize.storageKey,
+                                          customOptionsByFieldKey: fixedOptions,
+                                        )
+                                        .map(
+                                          (item) => DropdownMenuItem(
+                                            value: item,
+                                            child: Text(item),
+                                          ),
+                                        )
+                                        .toList(),
                                 onChanged: (value) async {
                                   await controller.updateShotField(
                                     shotId: shot.id,
@@ -1842,7 +1867,8 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                               const SizedBox(height: 12),
                               buildImageField(
                                 label: '参考图',
-                                fieldKey: ShotFieldKey.referenceImage.storageKey,
+                                fieldKey:
+                                    ShotFieldKey.referenceImage.storageKey,
                                 asset: shot.referenceImage,
                               ),
                               const SizedBox(height: 12),
@@ -1889,7 +1915,8 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                                 maxLines: 4,
                                 onCommit: (value) => controller.updateShotField(
                                   shotId: shot.id,
-                                  fieldKey: ShotFieldKey.sceneExpectation.storageKey,
+                                  fieldKey:
+                                      ShotFieldKey.sceneExpectation.storageKey,
                                   value: value,
                                 ),
                               ),
@@ -1907,87 +1934,115 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                               ),
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
-                                initialValue: shot.cameraAngle.isEmpty ? null : shot.cameraAngle,
-                                decoration: const InputDecoration(labelText: '机位角度'),
-                                items: fixedFieldOptions(
-                                  ShotFieldKey.cameraAngle.storageKey,
-                                  customOptionsByFieldKey: fixedOptions,
-                                )
-                                    .map(
-                                      (item) => DropdownMenuItem(
-                                        value: item,
-                                        child: Text(item),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) => controller.updateShotField(
-                                  shotId: shot.id,
-                                  fieldKey: ShotFieldKey.cameraAngle.storageKey,
-                                  value: value ?? '',
+                                initialValue: shot.cameraAngle.isEmpty
+                                    ? null
+                                    : shot.cameraAngle,
+                                decoration: const InputDecoration(
+                                  labelText: '机位角度',
                                 ),
+                                items:
+                                    fixedFieldOptions(
+                                          ShotFieldKey.cameraAngle.storageKey,
+                                          customOptionsByFieldKey: fixedOptions,
+                                        )
+                                        .map(
+                                          (item) => DropdownMenuItem(
+                                            value: item,
+                                            child: Text(item),
+                                          ),
+                                        )
+                                        .toList(),
+                                onChanged: (value) =>
+                                    controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey:
+                                          ShotFieldKey.cameraAngle.storageKey,
+                                      value: value ?? '',
+                                    ),
                               ),
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
-                                initialValue: shot.cameraMove.isEmpty ? null : shot.cameraMove,
-                                decoration: const InputDecoration(labelText: '运镜'),
-                                items: fixedFieldOptions(
-                                  ShotFieldKey.cameraMove.storageKey,
-                                  customOptionsByFieldKey: fixedOptions,
-                                )
-                                    .map(
-                                      (item) => DropdownMenuItem(
-                                        value: item,
-                                        child: Text(item),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) => controller.updateShotField(
-                                  shotId: shot.id,
-                                  fieldKey: ShotFieldKey.cameraMove.storageKey,
-                                  value: value ?? '',
+                                initialValue: shot.cameraMove.isEmpty
+                                    ? null
+                                    : shot.cameraMove,
+                                decoration: const InputDecoration(
+                                  labelText: '运镜',
                                 ),
+                                items:
+                                    fixedFieldOptions(
+                                          ShotFieldKey.cameraMove.storageKey,
+                                          customOptionsByFieldKey: fixedOptions,
+                                        )
+                                        .map(
+                                          (item) => DropdownMenuItem(
+                                            value: item,
+                                            child: Text(item),
+                                          ),
+                                        )
+                                        .toList(),
+                                onChanged: (value) =>
+                                    controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey:
+                                          ShotFieldKey.cameraMove.storageKey,
+                                      value: value ?? '',
+                                    ),
                               ),
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
-                                initialValue: shot.cameraRig.isEmpty ? null : shot.cameraRig,
-                                decoration: const InputDecoration(labelText: '机位设备'),
-                                items: fixedFieldOptions(
-                                  ShotFieldKey.cameraRig.storageKey,
-                                  customOptionsByFieldKey: fixedOptions,
-                                )
-                                    .map(
-                                      (item) => DropdownMenuItem(
-                                        value: item,
-                                        child: Text(item),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) => controller.updateShotField(
-                                  shotId: shot.id,
-                                  fieldKey: ShotFieldKey.cameraRig.storageKey,
-                                  value: value ?? '',
+                                initialValue: shot.cameraRig.isEmpty
+                                    ? null
+                                    : shot.cameraRig,
+                                decoration: const InputDecoration(
+                                  labelText: '机位设备',
                                 ),
+                                items:
+                                    fixedFieldOptions(
+                                          ShotFieldKey.cameraRig.storageKey,
+                                          customOptionsByFieldKey: fixedOptions,
+                                        )
+                                        .map(
+                                          (item) => DropdownMenuItem(
+                                            value: item,
+                                            child: Text(item),
+                                          ),
+                                        )
+                                        .toList(),
+                                onChanged: (value) =>
+                                    controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey:
+                                          ShotFieldKey.cameraRig.storageKey,
+                                      value: value ?? '',
+                                    ),
                               ),
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
-                                initialValue: shot.focalLength.isEmpty ? null : shot.focalLength,
-                                decoration: const InputDecoration(labelText: '焦段'),
-                                items: fixedFieldOptions(
-                                  ShotFieldKey.focalLength.storageKey,
-                                  customOptionsByFieldKey: fixedOptions,
-                                )
-                                    .map(
-                                      (item) => DropdownMenuItem(
-                                        value: item,
-                                        child: Text(item),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) => controller.updateShotField(
-                                  shotId: shot.id,
-                                  fieldKey: ShotFieldKey.focalLength.storageKey,
-                                  value: value ?? '',
+                                initialValue: shot.focalLength.isEmpty
+                                    ? null
+                                    : shot.focalLength,
+                                decoration: const InputDecoration(
+                                  labelText: '焦段',
                                 ),
+                                items:
+                                    fixedFieldOptions(
+                                          ShotFieldKey.focalLength.storageKey,
+                                          customOptionsByFieldKey: fixedOptions,
+                                        )
+                                        .map(
+                                          (item) => DropdownMenuItem(
+                                            value: item,
+                                            child: Text(item),
+                                          ),
+                                        )
+                                        .toList(),
+                                onChanged: (value) =>
+                                    controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey:
+                                          ShotFieldKey.focalLength.storageKey,
+                                      value: value ?? '',
+                                    ),
                               ),
                               for (final column in customColumns) ...[
                                 const SizedBox(height: 12),
@@ -1995,51 +2050,67 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                                   CustomColumnType.text => buildTextField(
                                     label: column.name,
                                     initialValue:
-                                        (shot.customFieldValues[column.fieldKey] as String?) ?? '',
-                                    onCommit: (value) => controller.updateShotField(
-                                      shotId: shot.id,
-                                      fieldKey: column.fieldKey,
-                                      value: value,
-                                    ),
+                                        (shot.customFieldValues[column.fieldKey]
+                                            as String?) ??
+                                        '',
+                                    onCommit: (value) =>
+                                        controller.updateShotField(
+                                          shotId: shot.id,
+                                          fieldKey: column.fieldKey,
+                                          value: value,
+                                        ),
                                   ),
                                   CustomColumnType.number => buildTextField(
                                     label: column.name,
                                     initialValue:
                                         '${shot.customFieldValues[column.fieldKey] ?? ''}',
-                                    keyboardType: const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                    onCommit: (value) => controller.updateShotField(
-                                      shotId: shot.id,
-                                      fieldKey: column.fieldKey,
-                                      value: double.tryParse(value) ?? 0,
-                                    ),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    onCommit: (value) =>
+                                        controller.updateShotField(
+                                          shotId: shot.id,
+                                          fieldKey: column.fieldKey,
+                                          value: double.tryParse(value) ?? 0,
+                                        ),
                                   ),
-                                  CustomColumnType.singleSelect => DropdownButtonFormField<String>(
-                                    initialValue: (shot.customFieldValues[column.fieldKey] as String?)
-                                            ?.isEmpty ==
-                                        true
-                                        ? null
-                                        : shot.customFieldValues[column.fieldKey] as String?,
-                                    decoration: InputDecoration(labelText: column.name),
-                                    items: column.options
-                                        .map(
-                                          (item) => DropdownMenuItem<String>(
-                                            value: item,
-                                            child: Text(item),
+                                  CustomColumnType.singleSelect =>
+                                    DropdownButtonFormField<String>(
+                                      initialValue:
+                                          (shot.customFieldValues[column
+                                                          .fieldKey]
+                                                      as String?)
+                                                  ?.isEmpty ==
+                                              true
+                                          ? null
+                                          : shot.customFieldValues[column
+                                                    .fieldKey]
+                                                as String?,
+                                      decoration: InputDecoration(
+                                        labelText: column.name,
+                                      ),
+                                      items: column.options
+                                          .map(
+                                            (item) => DropdownMenuItem<String>(
+                                              value: item,
+                                              child: Text(item),
+                                            ),
+                                          )
+                                          .toList(),
+                                      onChanged: (value) =>
+                                          controller.updateShotField(
+                                            shotId: shot.id,
+                                            fieldKey: column.fieldKey,
+                                            value: value ?? '',
                                           ),
-                                        )
-                                        .toList(),
-                                    onChanged: (value) => controller.updateShotField(
-                                      shotId: shot.id,
-                                      fieldKey: column.fieldKey,
-                                      value: value ?? '',
                                     ),
-                                  ),
                                   CustomColumnType.image => buildImageField(
                                     label: column.name,
                                     fieldKey: column.fieldKey,
-                                    asset: shot.customFieldValues[column.fieldKey] as AssetRef?,
+                                    asset:
+                                        shot.customFieldValues[column.fieldKey]
+                                            as AssetRef?,
                                   ),
                                   _ => const SizedBox.shrink(),
                                 },
@@ -2089,7 +2160,7 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
     final initialHeight = explicitHeights.isEmpty
         ? 108.0 * uiScale
         : explicitHeights.reduce((sum, value) => sum + value) /
-            explicitHeights.length;
+              explicitHeights.length;
     final controller = TextEditingController(
       text: initialHeight.toStringAsFixed(0),
     );
@@ -2300,14 +2371,10 @@ class _EditorToolbar extends StatelessWidget {
                             Text('已选 $selectedCount', style: summaryStyle),
                           ],
                           if (activeSceneLabel != null &&
-                              activeSceneLabel!.trim().isNotEmpty)
-                            ...[
-                              const SizedBox(width: 6),
-                              Text(
-                                '当前场：$activeSceneLabel',
-                                style: summaryStyle,
-                              ),
-                            ],
+                              activeSceneLabel!.trim().isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Text('当前场：$activeSceneLabel', style: summaryStyle),
+                          ],
                           SizedBox(width: dense ? 10 : 12),
                           _ToolbarPillButton(
                             icon: Icons.checklist_rtl_rounded,
@@ -2410,7 +2477,9 @@ class _EditorToolbar extends StatelessWidget {
                     builder: (context, controller, child) {
                       return FilledButton.icon(
                         onPressed: () {
-                          controller.isOpen ? controller.close() : controller.open();
+                          controller.isOpen
+                              ? controller.close()
+                              : controller.open();
                         },
                         icon: const Icon(Icons.add_rounded, size: 16),
                         label: const Text('新建'),
@@ -2475,13 +2544,14 @@ class _SceneStrip extends StatelessWidget {
   final List<ShotRecord> shots;
   final String? activeSceneId;
   final ValueChanged<String> onSelectScene;
-  final Future<void> Function(String shotId, String targetSceneId)
+  final Future<void> Function(List<String> shotIds, String targetSceneId)
   onMoveShotToScene;
   final VoidCallback onCreateScene;
 
   @override
   Widget build(BuildContext context) {
-    final orderedScenes = [...scenes]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+    final orderedScenes = [...scenes]
+      ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
     final shotsByScene = <String, int>{};
     for (final shot in shots) {
       final sceneId = shot.sceneId;
@@ -2519,13 +2589,13 @@ class _SceneStrip extends StatelessWidget {
                     : theme.textTheme.bodyMedium?.color;
                 return DragTarget<String>(
                   onWillAcceptWithDetails: (details) =>
-                      _extractShotDragId(details.data) != null,
+                      _extractShotDragIds(details.data).isNotEmpty,
                   onAcceptWithDetails: (details) async {
-                    final shotId = _extractShotDragId(details.data);
-                    if (shotId == null) {
+                    final shotIds = _extractShotDragIds(details.data);
+                    if (shotIds.isEmpty) {
                       return;
                     }
-                    await onMoveShotToScene(shotId, scene.id);
+                    await onMoveShotToScene(shotIds, scene.id);
                   },
                   builder: (context, candidateData, rejectedData) {
                     final highlighted = candidateData.isNotEmpty;
@@ -2544,13 +2614,13 @@ class _SceneStrip extends StatelessWidget {
                           ),
                           decoration: BoxDecoration(
                             color: highlighted
-                                ? scheme.primaryContainer.withValues(alpha: 0.88)
+                                ? scheme.primaryContainer.withValues(
+                                    alpha: 0.88,
+                                  )
                                 : backgroundColor,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: highlighted
-                                  ? scheme.primary
-                                  : borderColor,
+                              color: highlighted ? scheme.primary : borderColor,
                               width: highlighted ? 1.4 : 1,
                             ),
                           ),
@@ -2607,7 +2677,6 @@ class _SceneStrip extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _SceneWorkspace extends StatefulWidget {
@@ -2631,7 +2700,11 @@ class _SceneWorkspace extends StatefulWidget {
   final bool showSceneHeaders;
   final String? activeSceneId;
   final ValueChanged<String> onSelectScene;
-  final Future<void> Function(String shotId, String targetSceneId, int? targetIndex)
+  final Future<void> Function(
+    List<String> shotIds,
+    String targetSceneId,
+    int? targetIndex,
+  )
   onMoveShotToScene;
   final Future<void> Function(StoryboardScene scene) onRenameScene;
   final Future<void> Function(StoryboardScene scene, bool useManual)
@@ -2664,7 +2737,9 @@ class _SceneWorkspaceState extends State<_SceneWorkspace> {
   void didUpdateWidget(covariant _SceneWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activeSceneId != widget.activeSceneId) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActiveScene());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _scrollToActiveScene(),
+      );
     }
   }
 
@@ -2742,8 +2817,8 @@ class _SceneWorkspaceState extends State<_SceneWorkspace> {
               shotCount: sceneShots.length,
               shots: sceneShots,
               onSelect: () => widget.onSelectScene(scene.id),
-              onMoveShotToScene: (shotId) => widget.onMoveShotToScene(
-                shotId,
+              onMoveShotToScene: (shotIds) => widget.onMoveShotToScene(
+                shotIds,
                 scene.id,
                 sceneShots.length,
               ),
@@ -2841,7 +2916,7 @@ class _SceneWorkspaceBlock extends StatelessWidget {
   final int shotCount;
   final List<ShotRecord> shots;
   final VoidCallback onSelect;
-  final Future<void> Function(String shotId) onMoveShotToScene;
+  final Future<void> Function(List<String> shotIds) onMoveShotToScene;
   final Future<void> Function() onRenameScene;
   final Future<void> Function() onToggleNumberMode;
   final Future<void> Function() onEditManualNumber;
@@ -2868,13 +2943,13 @@ class _SceneWorkspaceBlock extends StatelessWidget {
 
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) =>
-          _extractShotDragId(details.data) != null,
+          _extractShotDragIds(details.data).isNotEmpty,
       onAcceptWithDetails: (details) async {
-        final shotId = _extractShotDragId(details.data);
-        if (shotId == null) {
+        final shotIds = _extractShotDragIds(details.data);
+        if (shotIds.isEmpty) {
           return;
         }
-        await onMoveShotToScene(shotId);
+        await onMoveShotToScene(shotIds);
       },
       builder: (context, candidateData, rejectedData) {
         final highlighted = candidateData.isNotEmpty;
@@ -2908,7 +2983,9 @@ class _SceneWorkspaceBlock extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: isActive
                         ? scheme.primaryContainer.withValues(alpha: 0.72)
-                        : scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                        : scheme.surfaceContainerHighest.withValues(
+                            alpha: 0.35,
+                          ),
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(12),
                     ),
@@ -2962,7 +3039,9 @@ class _SceneWorkspaceBlock extends StatelessWidget {
                               color: scheme.surface,
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: theme.dividerColor.withValues(alpha: 0.9),
+                                color: theme.dividerColor.withValues(
+                                  alpha: 0.9,
+                                ),
                               ),
                             ),
                             child: Icon(
@@ -3041,9 +3120,7 @@ class _SceneWorkspaceBlock extends StatelessWidget {
                                   child: SizedBox(
                                     width: 140,
                                     child: Text(
-                                      onDeleteScene != null
-                                          ? '删除空场'
-                                          : '仅空场可删除',
+                                      onDeleteScene != null ? '删除空场' : '仅空场可删除',
                                     ),
                                   ),
                                 ),

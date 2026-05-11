@@ -1,8 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
-
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,6 +30,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   );
 
   final Set<ExportDocumentType> _busyTypes = <ExportDocumentType>{};
+  late final TextEditingController _documentTitleController;
   late final TextEditingController _brandNameController;
   late final TextEditingController _brandTaglineController;
 
@@ -40,10 +40,14 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   bool _showDefaultBrandLogo = true;
   bool _fitPreviewToCanvas = true;
   double _previewZoom = 1.0;
+  double _documentTitleOffsetX = 0;
+  double _documentTitleOffsetY = 0;
 
   @override
   void initState() {
     super.initState();
+    _documentTitleController = TextEditingController(text: '分镜单');
+    _documentTitleController.addListener(_handleDocumentTitleChanged);
     _brandNameController = TextEditingController(text: 'VisionDraft');
     _brandTaglineController = TextEditingController(text: '影视策划与前期统筹');
     _brandNameController.addListener(_handleBrandingChanged);
@@ -52,6 +56,8 @@ class _ExportPageState extends ConsumerState<ExportPage> {
 
   @override
   void dispose() {
+    _documentTitleController.removeListener(_handleDocumentTitleChanged);
+    _documentTitleController.dispose();
     _brandNameController.removeListener(_handleBrandingChanged);
     _brandTaglineController.removeListener(_handleBrandingChanged);
     _brandNameController.dispose();
@@ -68,6 +74,9 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       _selectedType.name,
       _gridPreviewFingerprint(gridSession),
       _snapshotPreviewFingerprint(snapshot),
+      _documentTitleController.text,
+      _documentTitleOffsetX.toStringAsFixed(1),
+      _documentTitleOffsetY.toStringAsFixed(1),
       _brandLogoPath ?? '',
       _showDefaultBrandLogo ? 'default-logo' : 'blank-logo',
       _brandNameController.text,
@@ -84,6 +93,9 @@ class _ExportPageState extends ConsumerState<ExportPage> {
           fitPreviewToCanvas: _fitPreviewToCanvas,
           previewZoom: _previewZoom,
           busyTypes: _busyTypes,
+          documentTitleController: _documentTitleController,
+          documentTitleOffsetX: _documentTitleOffsetX,
+          documentTitleOffsetY: _documentTitleOffsetY,
           brandNameController: _brandNameController,
           brandTaglineController: _brandTaglineController,
           brandLogoPath: _brandLogoPath,
@@ -112,6 +124,16 @@ class _ExportPageState extends ConsumerState<ExportPage> {
               _previewZoom = value;
             });
           },
+          onDocumentTitleOffsetXChanged: (value) {
+            setState(() {
+              _documentTitleOffsetX = value;
+            });
+          },
+          onDocumentTitleOffsetYChanged: (value) {
+            setState(() {
+              _documentTitleOffsetY = value;
+            });
+          },
           onPickLogo: _pickBrandLogo,
           onClearBranding: _clearBranding,
           onResetBranding: _resetBranding,
@@ -119,7 +141,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
 
         final preview = _ExportPreviewPanel(
           previewKey: previewKey,
-          title: _titleForType(_selectedType),
+          title: _resolvedDocumentTitle(_selectedType),
           filename: previewFilename,
           fitToCanvas: _fitPreviewToCanvas,
           zoom: _previewZoom,
@@ -167,13 +189,17 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       shots: snapshot.shots,
       columnPreset: snapshot.columnPreset,
       effectiveFieldOrderKeys: gridSession.effectiveFieldOrderKeys,
+      documentTitle: _resolvedDocumentTitle(type),
+      documentTitleOffsetX: _documentTitleOffsetX,
+      documentTitleOffsetY: _documentTitleOffsetY,
       scenes: snapshot.scenes,
       storyboardRows: snapshot.storyboardRows,
       editorScalePercent: gridSession.zoomPercent,
       effectiveColumnWidths: gridSession.columnWidthsByFieldKey,
       effectiveRowHeights: gridSession.rowHeightsByShotId,
       fieldLabelsByKey: {
-        for (final column in snapshot.customColumns) column.fieldKey: column.name,
+        for (final column in snapshot.customColumns)
+          column.fieldKey: column.name,
       },
       branding: ExportBranding(
         brandName: brandName,
@@ -188,6 +214,20 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     );
   }
 
+  String _resolvedDocumentTitle(ExportDocumentType type) {
+    if (type != ExportDocumentType.shotSheet) {
+      return _titleForType(type);
+    }
+    return _documentTitleController.text.trim();
+  }
+
+  void _handleDocumentTitleChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
   String _gridPreviewFingerprint(EditorGridSessionState gridSession) {
     final widths = gridSession.columnWidthsByFieldKey.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
@@ -196,8 +236,12 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     return Object.hashAll([
       gridSession.zoomPercent.toStringAsFixed(1),
       ...gridSession.effectiveFieldOrderKeys,
-      ...widths.map((entry) => '${entry.key}:${entry.value.toStringAsFixed(2)}'),
-      ...heights.map((entry) => '${entry.key}:${entry.value.toStringAsFixed(2)}'),
+      ...widths.map(
+        (entry) => '${entry.key}:${entry.value.toStringAsFixed(2)}',
+      ),
+      ...heights.map(
+        (entry) => '${entry.key}:${entry.value.toStringAsFixed(2)}',
+      ),
     ]).toString();
   }
 
@@ -223,7 +267,9 @@ class _ExportPageState extends ConsumerState<ExportPage> {
           shot.focalLength,
           shot.frameImage?.uri ?? '',
           shot.referenceImage?.uri ?? '',
-          ...shot.customFieldValues.entries.map((entry) => '${entry.key}:${entry.value}'),
+          ...shot.customFieldValues.entries.map(
+            (entry) => '${entry.key}:${entry.value}',
+          ),
         ]),
     ]).toString();
   }
@@ -275,13 +321,15 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     await _runPdfAction(
       type,
       action: (bytes, payload, filename) async {
-        final result = await ref.read(documentOutputServiceProvider).saveDocument(
-          bytes: bytes,
-          filename: filename,
-          initialDirectory: payload.bundle.rootPath,
-          typeGroup: _pdfTypeGroup,
-          confirmButtonText: '导出 PDF',
-        );
+        final result = await ref
+            .read(documentOutputServiceProvider)
+            .saveDocument(
+              bytes: bytes,
+              filename: filename,
+              initialDirectory: payload.bundle.rootPath,
+              typeGroup: _pdfTypeGroup,
+              confirmButtonText: '导出 PDF',
+            );
         if (result == null || !mounted) {
           return;
         }
@@ -307,7 +355,9 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     await _runPdfAction(
       type,
       action: (bytes, payload, filename) async {
-        final result = await ref.read(documentOutputServiceProvider).shareDocument(
+        final result = await ref
+            .read(documentOutputServiceProvider)
+            .shareDocument(
               bytes: bytes,
               filename: filename,
               subject: '${payload.bundle.name} - ${_titleForType(type)}',
@@ -341,13 +391,15 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       return;
     }
 
-    final result = await ref.read(documentOutputServiceProvider).saveDocument(
-      bytes: bytes,
-      filename: filename,
-      initialDirectory: snapshot.bundle.rootPath,
-      typeGroup: _excelTypeGroup,
-      confirmButtonText: '导出 Excel',
-    );
+    final result = await ref
+        .read(documentOutputServiceProvider)
+        .saveDocument(
+          bytes: bytes,
+          filename: filename,
+          initialDirectory: snapshot.bundle.rootPath,
+          typeGroup: _excelTypeGroup,
+          confirmButtonText: '导出 Excel',
+        );
     if (result == null || !mounted) {
       return;
     }
@@ -398,7 +450,10 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     ExportDocumentType type,
     ProjectWorkspaceSnapshot snapshot,
   ) {
-    final safeName = snapshot.bundle.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final safeName = snapshot.bundle.name.replaceAll(
+      RegExp(r'[\\/:*?"<>|]'),
+      '_',
+    );
     return '$safeName-${_slugForType(type)}.pdf';
   }
 
@@ -407,7 +462,10 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     ProjectWorkspaceSnapshot snapshot,
   ) {
     final stamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final safeName = snapshot.bundle.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final safeName = snapshot.bundle.name.replaceAll(
+      RegExp(r'[\\/:*?"<>|]'),
+      '_',
+    );
     return '$safeName-${_slugForType(type)}-$stamp.pdf';
   }
 
@@ -433,7 +491,9 @@ class _ExportPageState extends ConsumerState<ExportPage> {
     messenger.showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Theme.of(context).colorScheme.errorContainer : null,
+        backgroundColor: isError
+            ? Theme.of(context).colorScheme.errorContainer
+            : null,
       ),
     );
   }
@@ -447,6 +507,9 @@ class _ExportSidebar extends StatelessWidget {
     required this.fitPreviewToCanvas,
     required this.previewZoom,
     required this.busyTypes,
+    required this.documentTitleController,
+    required this.documentTitleOffsetX,
+    required this.documentTitleOffsetY,
     required this.brandNameController,
     required this.brandTaglineController,
     required this.brandLogoPath,
@@ -458,6 +521,8 @@ class _ExportSidebar extends StatelessWidget {
     required this.onShare,
     required this.onFitModeChanged,
     required this.onPreviewZoomChanged,
+    required this.onDocumentTitleOffsetXChanged,
+    required this.onDocumentTitleOffsetYChanged,
     required this.onPickLogo,
     required this.onClearBranding,
     required this.onResetBranding,
@@ -469,6 +534,9 @@ class _ExportSidebar extends StatelessWidget {
   final bool fitPreviewToCanvas;
   final double previewZoom;
   final Set<ExportDocumentType> busyTypes;
+  final TextEditingController documentTitleController;
+  final double documentTitleOffsetX;
+  final double documentTitleOffsetY;
   final TextEditingController brandNameController;
   final TextEditingController brandTaglineController;
   final String? brandLogoPath;
@@ -480,6 +548,8 @@ class _ExportSidebar extends StatelessWidget {
   final VoidCallback onShare;
   final ValueChanged<bool> onFitModeChanged;
   final ValueChanged<double> onPreviewZoomChanged;
+  final ValueChanged<double> onDocumentTitleOffsetXChanged;
+  final ValueChanged<double> onDocumentTitleOffsetYChanged;
   final Future<void> Function() onPickLogo;
   final VoidCallback onClearBranding;
   final VoidCallback onResetBranding;
@@ -488,6 +558,12 @@ class _ExportSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isBusy = busyTypes.contains(selectedType);
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+    final primarySaveLabel = isAndroid ? '保存 PDF 到设备' : '导出 PDF';
+    final excelSaveLabel = isAndroid ? '保存 Excel 到设备' : '导出 Excel';
+    final introText = isAndroid
+        ? 'Android 会优先保存到下载目录中的 VisionDraft 文件夹，也可以直接分享或打印。'
+        : 'Windows 会弹出保存位置，你可以保存、打印或直接分享导出文件。';
 
     return _PanelFrame(
       child: Column(
@@ -495,10 +571,7 @@ class _ExportSidebar extends StatelessWidget {
         children: [
           Text('导出与打印', style: theme.textTheme.headlineSmall),
           const SizedBox(height: 4),
-          Text(
-            'Android 会保存到临时导出目录并调用系统分享；Windows 会弹出保存位置。',
-            style: theme.textTheme.bodySmall,
-          ),
+          Text(introText, style: theme.textTheme.bodySmall),
           const SizedBox(height: 16),
           Expanded(
             child: SingleChildScrollView(
@@ -521,9 +594,12 @@ class _ExportSidebar extends StatelessWidget {
                           '${snapshot.callSheet.sectionSummaries.length} 条摘要，现场执行通告',
                       },
                       icon: switch (type) {
-                        ExportDocumentType.shotSheet => Icons.table_chart_outlined,
-                        ExportDocumentType.shootingPlan => Icons.schedule_outlined,
-                        ExportDocumentType.callSheet => Icons.description_outlined,
+                        ExportDocumentType.shotSheet =>
+                          Icons.table_chart_outlined,
+                        ExportDocumentType.shootingPlan =>
+                          Icons.schedule_outlined,
+                        ExportDocumentType.callSheet =>
+                          Icons.description_outlined,
                       },
                       selected: selectedType == type,
                       onTap: () => onTypeSelected(type),
@@ -542,7 +618,7 @@ class _ExportSidebar extends StatelessWidget {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.picture_as_pdf_outlined),
-                      label: const Text('导出 PDF'),
+                      label: Text(primarySaveLabel),
                     ),
                   ),
                   if (onExportExcel != null) ...[
@@ -552,7 +628,7 @@ class _ExportSidebar extends StatelessWidget {
                       child: OutlinedButton.icon(
                         onPressed: isBusy ? null : onExportExcel,
                         icon: const Icon(Icons.grid_on_rounded),
-                        label: const Text('导出 Excel'),
+                        label: Text(excelSaveLabel),
                       ),
                     ),
                   ],
@@ -577,6 +653,16 @@ class _ExportSidebar extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  if (selectedType == ExportDocumentType.shotSheet) ...[
+                    _DocumentTitleCard(
+                      controller: documentTitleController,
+                      offsetX: documentTitleOffsetX,
+                      offsetY: documentTitleOffsetY,
+                      onOffsetXChanged: onDocumentTitleOffsetXChanged,
+                      onOffsetYChanged: onDocumentTitleOffsetYChanged,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   _PreviewControlCard(
                     fitPreviewToCanvas: fitPreviewToCanvas,
                     previewZoom: previewZoom,
@@ -720,11 +806,85 @@ class _DocumentTypeTile extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Icon(
-                selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
                 color: selected ? scheme.primary : scheme.onSurfaceVariant,
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DocumentTitleCard extends StatelessWidget {
+  const _DocumentTitleCard({
+    required this.controller,
+    required this.offsetX,
+    required this.offsetY,
+    required this.onOffsetXChanged,
+    required this.onOffsetYChanged,
+  });
+
+  final TextEditingController controller;
+  final double offsetX;
+  final double offsetY;
+  final ValueChanged<double> onOffsetXChanged;
+  final ValueChanged<double> onOffsetYChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.18,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '分镜单标题',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: '标题',
+                hintText: '留空则不显示',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text('X 轴位置', style: theme.textTheme.labelMedium),
+            Slider(
+              value: offsetX,
+              min: -120,
+              max: 120,
+              divisions: 48,
+              label: offsetX.round().toString(),
+              onChanged: onOffsetXChanged,
+            ),
+            Text('Y 轴位置', style: theme.textTheme.labelMedium),
+            Slider(
+              value: offsetY,
+              min: -60,
+              max: 60,
+              divisions: 48,
+              label: offsetY.round().toString(),
+              onChanged: onOffsetYChanged,
+            ),
+          ],
         ),
       ),
     );
@@ -749,7 +909,9 @@ class _PreviewControlCard extends StatelessWidget {
     final theme = Theme.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.18),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.18,
+        ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: theme.dividerColor),
       ),
@@ -760,7 +922,9 @@ class _PreviewControlCard extends StatelessWidget {
           children: [
             Text(
               '预览缩放',
-              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
@@ -783,7 +947,9 @@ class _PreviewControlCard extends StatelessWidget {
                   tooltip: '缩小',
                   onPressed: fitPreviewToCanvas
                       ? null
-                      : () => onPreviewZoomChanged(math.max(0.5, previewZoom - 0.1)),
+                      : () => onPreviewZoomChanged(
+                          math.max(0.5, previewZoom - 0.1),
+                        ),
                   icon: const Icon(Icons.remove_rounded),
                 ),
                 Expanded(
@@ -800,7 +966,9 @@ class _PreviewControlCard extends StatelessWidget {
                   tooltip: '放大',
                   onPressed: fitPreviewToCanvas
                       ? null
-                      : () => onPreviewZoomChanged(math.min(2.2, previewZoom + 0.1)),
+                      : () => onPreviewZoomChanged(
+                          math.min(2.2, previewZoom + 0.1),
+                        ),
                   icon: const Icon(Icons.add_rounded),
                 ),
               ],
@@ -808,7 +976,9 @@ class _PreviewControlCard extends StatelessWidget {
             Align(
               alignment: Alignment.centerRight,
               child: Text(
-                fitPreviewToCanvas ? '当前：适应画布' : '当前：${(previewZoom * 100).round()}%',
+                fitPreviewToCanvas
+                    ? '当前：适应画布'
+                    : '当前：${(previewZoom * 100).round()}%',
                 style: theme.textTheme.labelMedium,
               ),
             ),
@@ -869,25 +1039,31 @@ class _BrandingCard extends StatelessWidget {
           children: [
             Text(
               '品牌区',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),
             Text(
               stateLabel,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 2),
-            Text(stateDescription, style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              stateDescription,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 10),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (showsAnyLogo) ...[
-                  _LogoPreview(logoPath: logoPath, showDefaultLogo: showDefaultLogo),
+                  _LogoPreview(
+                    logoPath: logoPath,
+                    showDefaultLogo: showDefaultLogo,
+                  ),
                   const SizedBox(width: 12),
                 ],
                 Expanded(
@@ -920,7 +1096,9 @@ class _BrandingCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (!showsAnyLogo && !hasBrandName && !hasBrandTagline) ...[
+                      if (!showsAnyLogo &&
+                          !hasBrandName &&
+                          !hasBrandTagline) ...[
                         const SizedBox(height: 8),
                         Text(
                           '当前导出顶部品牌区为纯空白。',
@@ -996,7 +1174,9 @@ class _DefaultLogoBox extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+          color: Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
         ),
         child: Image.asset(
           'assets/branding/default_logo.png',
@@ -1166,7 +1346,10 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
                       maxScale: 1,
                       child: SizedBox(
                         width: math.max(constraints.maxWidth, pageWidth + 32),
-                        height: math.max(constraints.maxHeight, pageHeight + 32),
+                        height: math.max(
+                          constraints.maxHeight,
+                          pageHeight + 32,
+                        ),
                         child: Center(
                           child: Container(
                             width: pageWidth,
@@ -1176,7 +1359,9 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
                               borderRadius: BorderRadius.circular(10),
                               boxShadow: [
                                 BoxShadow(
-                                  color: theme.colorScheme.shadow.withValues(alpha: 0.12),
+                                  color: theme.colorScheme.shadow.withValues(
+                                    alpha: 0.12,
+                                  ),
                                   blurRadius: 18,
                                   offset: const Offset(0, 8),
                                 ),
@@ -1203,7 +1388,9 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
                       bottom: 12,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.surface.withValues(alpha: 0.92),
+                          color: theme.colorScheme.surface.withValues(
+                            alpha: 0.92,
+                          ),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(color: theme.dividerColor),
                         ),
@@ -1229,7 +1416,9 @@ class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
                                 padding: EdgeInsets.zero,
                               ),
                               Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
                                 child: Text(
                                   '${currentPageIndex + 1} / ${pages.length}',
                                   style: theme.textTheme.labelMedium,
@@ -1289,10 +1478,7 @@ class _PanelFrame extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: theme.dividerColor),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: child,
-      ),
+      child: Padding(padding: const EdgeInsets.all(16), child: child),
     );
   }
 }

@@ -29,6 +29,9 @@ class ExportPayload {
     required this.shots,
     required this.columnPreset,
     required this.effectiveFieldOrderKeys,
+    this.documentTitle = '',
+    this.documentTitleOffsetX = 0,
+    this.documentTitleOffsetY = 0,
     this.scenes = const <StoryboardScene>[],
     this.storyboardRows = const <StoryboardRow>[],
     this.editorScalePercent = 100,
@@ -46,6 +49,9 @@ class ExportPayload {
   final List<ShotRecord> shots;
   final ColumnPreset columnPreset;
   final List<String> effectiveFieldOrderKeys;
+  final String documentTitle;
+  final double documentTitleOffsetX;
+  final double documentTitleOffsetY;
   final List<StoryboardScene> scenes;
   final List<StoryboardRow> storyboardRows;
   final double editorScalePercent;

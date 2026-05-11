@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -14,7 +14,6 @@ import 'shot_sheet_export_layout.dart';
 class ExcelExportService {
   const ExcelExportService();
 
-  static const String _sheetName = '分镜单';
   static const String _sheetPath = 'xl/worksheets/sheet1.xml';
   static const String _drawingPath = 'xl/drawings/drawing1.xml';
   static const String _drawingRelsPath = 'xl/drawings/_rels/drawing1.xml.rels';
@@ -23,12 +22,13 @@ class ExcelExportService {
   Future<Uint8List> generate(ExportPayload payload) async {
     final resolved = const ShotSheetExportLayoutResolver().resolve(payload);
     final fields = resolved.fields.orderedVisibleFieldKeys;
+    final sheetName = _resolvedSheetName(payload);
     final excel = Excel.createExcel();
     final defaultSheet = excel.getDefaultSheet();
-    if (defaultSheet != null && defaultSheet != _sheetName) {
-      excel.rename(defaultSheet, _sheetName);
+    if (defaultSheet != null && defaultSheet != sheetName) {
+      excel.rename(defaultSheet, sheetName);
     }
-    final sheet = excel[_sheetName];
+    final sheet = excel[sheetName];
 
     final headerStyle = _headerCellStyle();
     final textStyle = _textCellStyle();
@@ -96,7 +96,9 @@ class ExcelExportService {
                   resolved.columnWidths[fieldKey] ?? 140,
                 ),
               ),
-              cellHeightPx: _rowPixelsFromPoints(_rowPointsFromPixels(rowHeightPx)),
+              cellHeightPx: _rowPixelsFromPoints(
+                _rowPointsFromPixels(rowHeightPx),
+              ),
             );
             if (anchor != null) {
               imageAnchors.add(anchor);
@@ -104,9 +106,15 @@ class ExcelExportService {
             continue;
           }
 
-          final value = shotSheetFieldValue(shot, fieldKey, payload.boardPreset);
+          final value = shotSheetFieldValue(
+            shot,
+            fieldKey,
+            payload.boardPreset,
+          );
           cell.value = _toCellValue(fieldKey, value);
-          cell.cellStyle = _prefersCenteredCell(fieldKey) ? centeredStyle : textStyle;
+          cell.cellStyle = _prefersCenteredCell(fieldKey)
+              ? centeredStyle
+              : textStyle;
         }
         rowIndex += 1;
       }
@@ -118,6 +126,17 @@ class ExcelExportService {
       return bytes;
     }
     return _embedImagesIntoWorkbook(bytes, imageAnchors);
+  }
+
+  String _resolvedSheetName(ExportPayload payload) {
+    final title = payload.documentTitle.trim();
+    final safe = (title.isEmpty ? '分镜单' : title)
+        .replaceAll(RegExp(r'[:\\\\/?*\\[\\]]'), ' ')
+        .trim();
+    if (safe.isEmpty) {
+      return '分镜单';
+    }
+    return safe.length <= 31 ? safe : safe.substring(0, 31);
   }
 
   CellStyle _headerCellStyle() {
@@ -148,7 +167,7 @@ class ExcelExportService {
     return CellStyle(
       bold: true,
       backgroundColorHex: ExcelColor.grey200,
-      horizontalAlign: HorizontalAlign.Left,
+      horizontalAlign: HorizontalAlign.Center,
       verticalAlign: VerticalAlign.Center,
       textWrapping: TextWrapping.WrapText,
       leftBorder: border,
@@ -238,7 +257,9 @@ class ExcelExportService {
       return null;
     }
     final bytes = await file.readAsBytes();
-    final intrinsicWidth = (asset?.width ?? 0) > 0 ? asset!.width!.toDouble() : cellWidthPx;
+    final intrinsicWidth = (asset?.width ?? 0) > 0
+        ? asset!.width!.toDouble()
+        : cellWidthPx;
     final intrinsicHeight = (asset?.height ?? 0) > 0
         ? asset!.height!.toDouble()
         : math.max(cellHeightPx, 1).toDouble();
@@ -271,7 +292,11 @@ class ExcelExportService {
     List<_ExcelEmbeddedImageAnchor> anchors,
   ) async {
     final archive = ZipDecoder().decodeBytes(workbookBytes);
-    final drawingDoc = _loadXmlDocument(archive, _drawingPath, _emptyDrawingXml());
+    final drawingDoc = _loadXmlDocument(
+      archive,
+      _drawingPath,
+      _emptyDrawingXml(),
+    );
     final drawingRelsDoc = _loadXmlDocument(
       archive,
       _drawingRelsPath,
@@ -292,7 +317,9 @@ class ExcelExportService {
     _ensureWorksheetDrawingReference(sheetRoot);
 
     var mediaIndex = 1;
-    final existingMedia = archive.files.where((file) => file.name.startsWith('xl/media/image'));
+    final existingMedia = archive.files.where(
+      (file) => file.name.startsWith('xl/media/image'),
+    );
     for (final file in existingMedia) {
       final match = RegExp(r'image(\d+)').firstMatch(file.name);
       final parsed = match == null ? null : int.tryParse(match.group(1)!);
@@ -311,17 +338,17 @@ class ExcelExportService {
 
       _upsertArchiveBytes(archive, mediaPath, anchor.bytes);
       drawingRelsRoot.children.add(
-        XmlElement(
-          XmlName('Relationship'),
-          [
-            XmlAttribute(XmlName('Id'), relId),
-            XmlAttribute(
-              XmlName('Type'),
-              'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image',
-            ),
-            XmlAttribute(XmlName('Target'), '../media/${mediaPath.split('/').last}'),
-          ],
-        ),
+        XmlElement(XmlName('Relationship'), [
+          XmlAttribute(XmlName('Id'), relId),
+          XmlAttribute(
+            XmlName('Type'),
+            'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image',
+          ),
+          XmlAttribute(
+            XmlName('Target'),
+            '../media/${mediaPath.split('/').last}',
+          ),
+        ]),
       );
 
       drawingRoot.children.add(
@@ -340,11 +367,7 @@ class ExcelExportService {
       _drawingRelsPath,
       _xmlWithDeclaration(drawingRelsDoc),
     );
-    _upsertArchiveString(
-      archive,
-      _sheetPath,
-      _xmlWithDeclaration(sheetDoc),
-    );
+    _upsertArchiveString(archive, _sheetPath, _xmlWithDeclaration(sheetDoc));
     _upsertArchiveString(
       archive,
       _contentTypesPath,
@@ -385,13 +408,10 @@ class ExcelExportService {
         continue;
       }
       root.children.add(
-        XmlElement(
-          XmlName('Default'),
-          [
-            XmlAttribute(XmlName('Extension'), entry.key),
-            XmlAttribute(XmlName('ContentType'), entry.value),
-          ],
-        ),
+        XmlElement(XmlName('Default'), [
+          XmlAttribute(XmlName('Extension'), entry.key),
+          XmlAttribute(XmlName('ContentType'), entry.value),
+        ]),
       );
     }
   }
@@ -403,10 +423,9 @@ class ExcelExportService {
     if (hasDrawing) {
       return;
     }
-    final drawingElement = XmlElement(
-      XmlName('drawing'),
-      [XmlAttribute(XmlName('id', 'r'), 'rId1')],
-    );
+    final drawingElement = XmlElement(XmlName('drawing'), [
+      XmlAttribute(XmlName('id', 'r'), 'rId1'),
+    ]);
     final pageMarginsIndex = sheetRoot.children.indexWhere(
       (node) => node is XmlElement && node.name.local == 'pageMargins',
     );
@@ -447,11 +466,9 @@ class ExcelExportService {
       );
     }
     blipChildren.add(
-      XmlElement(
-        XmlName('stretch', 'a'),
-        [],
-        [XmlElement(XmlName('fillRect', 'a'))],
-      ),
+      XmlElement(XmlName('stretch', 'a'), [], [
+        XmlElement(XmlName('fillRect', 'a')),
+      ]),
     );
 
     return XmlElement(
@@ -459,15 +476,23 @@ class ExcelExportService {
       [XmlAttribute(XmlName('editAs'), 'oneCell')],
       [
         XmlElement(XmlName('from', 'xdr'), [], [
-          XmlElement(XmlName('col', 'xdr'), [], [XmlText('${anchor.columnIndex}')]),
+          XmlElement(XmlName('col', 'xdr'), [], [
+            XmlText('${anchor.columnIndex}'),
+          ]),
           XmlElement(XmlName('colOff', 'xdr'), [], [XmlText('$fromColOff')]),
-          XmlElement(XmlName('row', 'xdr'), [], [XmlText('${anchor.rowIndex}')]),
+          XmlElement(XmlName('row', 'xdr'), [], [
+            XmlText('${anchor.rowIndex}'),
+          ]),
           XmlElement(XmlName('rowOff', 'xdr'), [], [XmlText('$fromRowOff')]),
         ]),
         XmlElement(XmlName('to', 'xdr'), [], [
-          XmlElement(XmlName('col', 'xdr'), [], [XmlText('${anchor.columnIndex}')]),
+          XmlElement(XmlName('col', 'xdr'), [], [
+            XmlText('${anchor.columnIndex}'),
+          ]),
           XmlElement(XmlName('colOff', 'xdr'), [], [XmlText('$toColOff')]),
-          XmlElement(XmlName('row', 'xdr'), [], [XmlText('${anchor.rowIndex}')]),
+          XmlElement(XmlName('row', 'xdr'), [], [
+            XmlText('${anchor.rowIndex}'),
+          ]),
           XmlElement(XmlName('rowOff', 'xdr'), [], [XmlText('$toRowOff')]),
         ]),
         XmlElement(XmlName('pic', 'xdr'), [], [
@@ -490,15 +515,21 @@ class ExcelExportService {
                 XmlAttribute(XmlName('y'), '0'),
               ]),
               XmlElement(XmlName('ext', 'a'), [
-                XmlAttribute(XmlName('cx'), '${_emuFromPixels(anchor.displayWidthPx)}'),
-                XmlAttribute(XmlName('cy'), '${_emuFromPixels(anchor.displayHeightPx)}'),
+                XmlAttribute(
+                  XmlName('cx'),
+                  '${_emuFromPixels(anchor.displayWidthPx)}',
+                ),
+                XmlAttribute(
+                  XmlName('cy'),
+                  '${_emuFromPixels(anchor.displayHeightPx)}',
+                ),
               ]),
             ]),
-            XmlElement(XmlName('prstGeom', 'a'), [
-              XmlAttribute(XmlName('prst'), 'rect'),
-            ], [
-              XmlElement(XmlName('avLst', 'a')),
-            ]),
+            XmlElement(
+              XmlName('prstGeom', 'a'),
+              [XmlAttribute(XmlName('prst'), 'rect')],
+              [XmlElement(XmlName('avLst', 'a'))],
+            ),
           ]),
         ]),
         XmlElement(XmlName('clientData', 'xdr')),
@@ -536,13 +567,15 @@ class ExcelExportService {
       var cropBottom = 0;
       if (imageRatio > cellRatio) {
         final visibleWidth = safeImageHeight * cellRatio;
-        final trimRatio = (safeImageWidth - visibleWidth) / (2 * safeImageWidth);
+        final trimRatio =
+            (safeImageWidth - visibleWidth) / (2 * safeImageWidth);
         final crop = (trimRatio * 100000).round();
         cropLeft = crop;
         cropRight = crop;
       } else if (imageRatio < cellRatio) {
         final visibleHeight = safeImageWidth / cellRatio;
-        final trimRatio = (safeImageHeight - visibleHeight) / (2 * safeImageHeight);
+        final trimRatio =
+            (safeImageHeight - visibleHeight) / (2 * safeImageHeight);
         final crop = (trimRatio * 100000).round();
         cropTop = crop;
         cropBottom = crop;
@@ -559,7 +592,10 @@ class ExcelExportService {
       );
     }
 
-    final scale = math.min(safeCellWidth / safeImageWidth, safeCellHeight / safeImageHeight);
+    final scale = math.min(
+      safeCellWidth / safeImageWidth,
+      safeCellHeight / safeImageHeight,
+    );
     final displayWidth = safeImageWidth * scale;
     final displayHeight = safeImageHeight * scale;
     return _ImagePlacement(
@@ -674,4 +710,3 @@ class _ImagePlacement {
   final int cropRight;
   final int cropBottom;
 }
-

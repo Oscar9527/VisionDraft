@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
@@ -39,7 +39,7 @@ typedef RowActionRequested = Future<void> Function(int rowIndex);
 typedef DeleteRowRequested = Future<void> Function(String shotId);
 typedef ShotDropRequested =
     Future<void> Function({
-      required String shotId,
+      required List<String> shotIds,
       required int targetIndex,
     });
 
@@ -60,13 +60,19 @@ typedef CustomColumnOptionDeleteRequested =
 
 const String _shotDragPrefix = 'shot:';
 
-String _shotDragData(String shotId) => '$_shotDragPrefix$shotId';
+String _shotDragData(List<String> shotIds) =>
+    '$_shotDragPrefix${shotIds.join(",")}';
 
-String? _extractShotDragId(Object? data) {
+List<String> _extractShotDragIds(Object? data) {
   if (data is! String || !data.startsWith(_shotDragPrefix)) {
-    return null;
+    return const <String>[];
   }
-  return data.substring(_shotDragPrefix.length);
+  return data
+      .substring(_shotDragPrefix.length)
+      .split(',')
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
 }
 
 class StoryboardTable extends StatefulWidget {
@@ -80,6 +86,8 @@ class StoryboardTable extends StatefulWidget {
     required this.boardPreset,
     required this.isBatchMode,
     required this.selectedShotIds,
+    this.dragSelectedShotIdsInOrder = const <String>[],
+    this.globalSelectedShotCount = 0,
     required this.onSelectShot,
     required this.onReorder,
     required this.onUpdateField,
@@ -115,6 +123,8 @@ class StoryboardTable extends StatefulWidget {
   final BoardPreset boardPreset;
   final bool isBatchMode;
   final Set<String> selectedShotIds;
+  final List<String> dragSelectedShotIdsInOrder;
+  final int globalSelectedShotCount;
   final void Function(String shotId, bool selected) onSelectShot;
   final void Function(int oldIndex, int newIndex) onReorder;
   final ShotFieldUpdater onUpdateField;
@@ -152,6 +162,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
   bool _syncingHeader = false;
   bool _syncingContent = false;
   String? _draggingShotId;
+  List<String> _draggingShotIds = const <String>[];
 
   double get _uiScale => widget.zoomPercent / 100;
   double get _leadingWidth => 64;
@@ -412,12 +423,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
             children: [
               SizedBox(
                 width: _leadingWidth,
-                child: _buildLeadingCell(
-                  context,
-                  index,
-                  shot,
-                  selected,
-                ),
+                child: _buildLeadingCell(context, index, shot, selected),
               ),
               Expanded(
                 child: SingleChildScrollView(
@@ -468,9 +474,9 @@ class _StoryboardTableState extends State<StoryboardTable> {
                                 ? null
                                 : Border(
                                     left: BorderSide(
-                                      color: Theme.of(context)
-                                          .dividerColor
-                                          .withValues(alpha: 0.72),
+                                      color: Theme.of(
+                                        context,
+                                      ).dividerColor.withValues(alpha: 0.72),
                                     ),
                                   ),
                           ),
@@ -500,21 +506,18 @@ class _StoryboardTableState extends State<StoryboardTable> {
     required double totalWidth,
     required bool isDark,
   }) {
-    if (widget.isBatchMode || widget.onDropShot == null) {
+    if (widget.onDropShot == null) {
       return const SizedBox.shrink();
     }
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) =>
-          _extractShotDragId(details.data) != null,
+          _extractShotDragIds(details.data).isNotEmpty,
       onAcceptWithDetails: (details) async {
-        final shotId = _extractShotDragId(details.data);
-        if (shotId == null) {
+        final shotIds = _extractShotDragIds(details.data);
+        if (shotIds.isEmpty) {
           return;
         }
-        await widget.onDropShot!(
-          shotId: shotId,
-          targetIndex: targetIndex,
-        );
+        await widget.onDropShot!(shotIds: shotIds, targetIndex: targetIndex);
       },
       builder: (context, candidateData, rejectedData) {
         final active = candidateData.isNotEmpty;
@@ -527,9 +530,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
             color: active
                 ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.16)
                 : dragging
-                ? Theme.of(
-                    context,
-                  ).colorScheme.primary.withValues(alpha: 0.06)
+                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(999),
           ),
@@ -556,24 +557,34 @@ class _StoryboardTableState extends State<StoryboardTable> {
     ShotRecord shot,
     bool selected,
   ) {
-    if (widget.isBatchMode) {
-      return Center(
-        child: Checkbox(
-          value: selected,
-          visualDensity: VisualDensity.compact,
-          onChanged: (value) => widget.onSelectShot(shot.id, value == true),
-        ),
-      );
+    final hasGlobalSelection = widget.globalSelectedShotCount > 0;
+    List<String> dragSelection() {
+      if (!selected) {
+        return <String>[shot.id];
+      }
+      if (widget.dragSelectedShotIdsInOrder.length > 1) {
+        return widget.dragSelectedShotIdsInOrder;
+      }
+      if (widget.selectedShotIds.length > 1) {
+        return widget.shots
+            .where((item) => widget.selectedShotIds.contains(item.id))
+            .map((item) => item.id)
+            .toList();
+      }
+      return <String>[shot.id];
     }
+
     final dragHandle = widget.onDropShot == null
         ? _buildDragHandleIcon(context)
         : Draggable<String>(
-            data: _shotDragData(shot.id),
+            data: _shotDragData(dragSelection()),
             dragAnchorStrategy: pointerDragAnchorStrategy,
             maxSimultaneousDrags: 1,
             onDragStarted: () {
+              final selectedGroup = dragSelection();
               setState(() {
                 _draggingShotId = shot.id;
+                _draggingShotIds = selectedGroup;
               });
             },
             onDragEnd: (_) {
@@ -582,6 +593,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
               }
               setState(() {
                 _draggingShotId = null;
+                _draggingShotIds = const <String>[];
               });
             },
             onDraggableCanceled: (_, _) {
@@ -590,6 +602,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
               }
               setState(() {
                 _draggingShotId = null;
+                _draggingShotIds = const <String>[];
               });
             },
             feedback: Material(
@@ -611,9 +624,11 @@ class _StoryboardTableState extends State<StoryboardTable> {
                       vertical: 10,
                     ),
                     child: Text(
-                      shot.content.trim().isEmpty
-                          ? '镜头 ${shot.shotNo}'
-                          : shot.content,
+                      _draggingShotIds.length > 1
+                          ? '移动 ${_draggingShotIds.length} 个镜头'
+                          : (shot.content.trim().isEmpty
+                                ? '镜头 ${shot.shotNo}'
+                                : shot.content),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium,
@@ -631,6 +646,35 @@ class _StoryboardTableState extends State<StoryboardTable> {
               child: _buildDragHandleIcon(context),
             ),
           );
+    if (widget.isBatchMode) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          border: Border(
+            right: BorderSide(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.72),
+            ),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Checkbox(
+              value: selected,
+              visualDensity: VisualDensity.compact,
+              onChanged: (value) => widget.onSelectShot(shot.id, value == true),
+            ),
+            const SizedBox(height: 2),
+            Opacity(
+              opacity: selected || !hasGlobalSelection ? 1 : 0.42,
+              child: selected || !hasGlobalSelection
+                  ? dragHandle
+                  : _buildDragHandleIcon(context),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
@@ -688,12 +732,9 @@ class _StoryboardTableState extends State<StoryboardTable> {
       width: 24,
       height: 24,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest
-            .withValues(
-              alpha: Theme.of(context).brightness == Brightness.dark
-                  ? 0.5
-                  : 0.32,
-            ),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(
+          alpha: Theme.of(context).brightness == Brightness.dark ? 0.5 : 0.32,
+        ),
         shape: BoxShape.circle,
       ),
       child: Icon(
@@ -711,7 +752,7 @@ class _StoryboardTableState extends State<StoryboardTable> {
     final custom = _findCustomColumn(fieldKey);
     return custom?.type == CustomColumnType.image;
   }
- 
+
   List<String> _buildVisibleFieldKeys() {
     final visible = widget.columnPreset.visibleFieldKeys.toSet();
     final validFieldKeys = _validFieldKeys();
@@ -798,7 +839,11 @@ class _StoryboardTableState extends State<StoryboardTable> {
   double _defaultColumnWidth(String fieldKey) {
     final custom = _findCustomColumn(fieldKey);
     if (custom?.type == CustomColumnType.image) {
-      return _clampDouble(180, _minimumColumnWidth(fieldKey), _maximumColumnWidth(fieldKey));
+      return _clampDouble(
+        180,
+        _minimumColumnWidth(fieldKey),
+        _maximumColumnWidth(fieldKey),
+      );
     }
     final base = switch (fieldKey) {
       'shotNo' => 92.0,
@@ -914,7 +959,8 @@ class _StoryboardTableState extends State<StoryboardTable> {
         .where((fieldKey) => !_isImageFieldKey(fieldKey))
         .where(_prefersWidthExpansion)
         .where(
-          (fieldKey) => widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
+          (fieldKey) =>
+              widths[fieldKey]! < _maximumDisplayColumnWidth(fieldKey),
         )
         .toList();
     if (targets.isEmpty) {
@@ -1090,9 +1136,7 @@ class _LeadingHeaderCell extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Tooltip(
-        message: isBatchMode
-            ? '选择当前行镜头。拖动已选中行的底边，可批量调整这些行的高度'
-            : '拖动当前行调整镜头顺序',
+        message: isBatchMode ? '选择当前行镜头。拖动已选中行的底边，可批量调整这些行的高度' : '拖动当前行调整镜头顺序',
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1275,8 +1319,8 @@ class _HeaderCellState extends State<_HeaderCell> {
             bottom: 0,
             child: MouseRegion(
               cursor: SystemMouseCursors.resizeColumn,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
                 onHorizontalDragStart: (_) {
                   _dragStartWidth = widget.width;
                 },
@@ -1646,11 +1690,9 @@ class _EditableCellState extends State<_EditableCell> {
     return fixedFieldIsLongText(widget.fieldKey);
   }
 
-  double get _cellHorizontalPadding =>
-      _clampDouble(8 * widget.uiScale, 6, 16);
+  double get _cellHorizontalPadding => _clampDouble(8 * widget.uiScale, 6, 16);
 
-  double get _cellVerticalPadding =>
-      _clampDouble(6 * widget.uiScale, 4, 12);
+  double get _cellVerticalPadding => _clampDouble(6 * widget.uiScale, 4, 12);
 
   double get _textFontSize {
     final base = widget.boardPreset.textScaleMode == TextScaleMode.large
@@ -2131,7 +2173,9 @@ class _ImageFieldCellState extends State<_ImageFieldCell> {
                 Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.2),
+                    color: scheme.surfaceContainerHighest.withValues(
+                      alpha: 0.2,
+                    ),
                     borderRadius: BorderRadius.circular(
                       _clampDouble(6 * widget.uiScale, 4, 10),
                     ),
@@ -2224,9 +2268,7 @@ class _ImageFieldCellState extends State<_ImageFieldCell> {
             hasAsset ? '已关联图片' : '未关联图片',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
               fontSize: _clampDouble(11 * widget.uiScale, 10, 14),
             ),
           ),
@@ -2273,5 +2315,3 @@ const _defaultRowHeight = 108.0;
 const _minimumRowHeight = 84.0;
 const _maximumRowHeight = 280.0;
 const _customOptionSentinel = '__custom_option__';
-
-

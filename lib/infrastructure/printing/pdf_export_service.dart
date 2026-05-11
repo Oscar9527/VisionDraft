@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
@@ -112,30 +112,63 @@ class PdfExportService {
     );
 
     for (final pageShots in shotPages) {
-      final tableRows = <pw.TableRow>[
-        _tableHeaderRow(
-          visibleFields
-              .map((fieldKey) => _fieldLabel(payload, fieldKey))
-              .toList(),
-          rowHeight: layout.headerRowHeight,
-          fontSize: layout.headerFontSize,
+      final tableSections = <pw.Widget>[];
+      final headerRow = _tableHeaderRow(
+        visibleFields
+            .map((fieldKey) => _fieldLabel(payload, fieldKey))
+            .toList(),
+        rowHeight: layout.headerRowHeight,
+        fontSize: layout.headerFontSize,
+      );
+      tableSections.add(
+        pw.Table(
+          border: _shotSheetTableBorder(),
+          defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
+          columnWidths: {
+            for (var index = 0; index < visibleFields.length; index++)
+              index: pw.FixedColumnWidth(
+                layout.columnWidths[visibleFields[index]]!,
+              ),
+          },
+          children: [headerRow],
         ),
-      ];
+      );
+      final currentRows = <pw.TableRow>[];
+
+      Future<void> flushRows() async {
+        if (currentRows.isEmpty) {
+          return;
+        }
+        tableSections.add(
+          pw.Table(
+            border: _shotSheetTableBorder(),
+            defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
+            columnWidths: {
+              for (var index = 0; index < visibleFields.length; index++)
+                index: pw.FixedColumnWidth(
+                  layout.columnWidths[visibleFields[index]]!,
+                ),
+            },
+            children: List<pw.TableRow>.from(currentRows),
+          ),
+        );
+        currentRows.clear();
+      }
 
       for (final row in pageShots) {
         if (row is _ScenePageHeaderRow) {
-          tableRows.add(
-            _sceneHeaderTableRow(
-              row.label,
-              columnCount: visibleFields.length,
-              rowHeight: _shotSheetSceneHeaderHeight,
-              fontSize: layout.bodyFontSize,
+          await flushRows();
+          tableSections.add(
+            _shotSheetSceneHeaderCell(
+              label: row.label,
+              width: layout.tableWidth,
+              fontSize: math.max(layout.bodyFontSize, 8.2),
             ),
           );
           continue;
         }
         final shot = (row as _ScenePageShotRow).shot;
-        tableRows.add(
+        currentRows.add(
           await _shotSheetRow(
             shot: shot,
             fields: visibleFields,
@@ -150,6 +183,7 @@ class PdfExportService {
           ),
         );
       }
+      await flushRows();
 
       document.addPage(
         pw.Page(
@@ -164,7 +198,6 @@ class PdfExportService {
                 children: [
                   _pdfHeader(
                     title: _titleForType(payload.documentType),
-                    projectName: payload.bundle.name,
                     payload: payload,
                     brandingLogo: brandingLogo,
                     scale: layout.headerScale,
@@ -174,18 +207,7 @@ class PdfExportService {
                     alignment: pw.Alignment.topCenter,
                     child: pw.SizedBox(
                       width: layout.tableWidth,
-                      child: pw.Table(
-                        border: _shotSheetTableBorder(),
-                        defaultVerticalAlignment:
-                            pw.TableCellVerticalAlignment.middle,
-                        columnWidths: {
-                          for (var index = 0; index < visibleFields.length; index++)
-                            index: pw.FixedColumnWidth(
-                              layout.columnWidths[visibleFields[index]]!,
-                            ),
-                        },
-                        children: tableRows,
-                      ),
+                      child: pw.Column(children: tableSections),
                     ),
                   ),
                 ],
@@ -213,7 +235,6 @@ class PdfExportService {
           final widgets = <pw.Widget>[
             _pdfHeader(
               title: _titleForType(payload.documentType),
-              projectName: payload.bundle.name,
               payload: payload,
               brandingLogo: brandingLogo,
             ),
@@ -358,7 +379,6 @@ class PdfExportService {
           final widgets = <pw.Widget>[
             _pdfHeader(
               title: _titleForType(payload.documentType),
-              projectName: payload.bundle.name,
               payload: payload,
               brandingLogo: brandingLogo,
             ),
@@ -482,8 +502,6 @@ class PdfExportService {
     );
   }
 
-
-
   Future<pw.TableRow> _shotSheetRow({
     required ShotRecord shot,
     required List<String> fields,
@@ -539,7 +557,6 @@ class PdfExportService {
 
   pw.Widget _pdfHeader({
     required String title,
-    required String projectName,
     required ExportPayload payload,
     required pw.MemoryImage? brandingLogo,
     double scale = 1.0,
@@ -550,11 +567,11 @@ class PdfExportService {
         brandingLogo != null || brandName.isNotEmpty || tagline.isNotEmpty;
     final paddingBottom = 10 * scale;
     final titleSize = math.max(12.0, 18 * scale);
-    final projectSize = math.max(8.6, 11 * scale);
     final brandSize = math.max(8.4, 11 * scale);
     final taglineSize = math.max(7.0, 8.5 * scale);
     final logoSize = math.max(20.0, 28 * scale);
     final gap = math.max(8.0, 16 * scale);
+    final resolvedTitle = payload.documentTitle.trim();
 
     return pw.Container(
       padding: pw.EdgeInsets.only(bottom: paddingBottom),
@@ -569,26 +586,22 @@ class PdfExportService {
           pw.Expanded(
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisSize: pw.MainAxisSize.min,
               children: [
-                pw.Text(
-                  title,
-                  style: pw.TextStyle(
-                    fontSize: titleSize,
-                    fontWeight: pw.FontWeight.bold,
+                if (resolvedTitle.isNotEmpty)
+                  pw.Transform.translate(
+                    offset: PdfPoint(
+                      payload.documentTitleOffsetX,
+                      payload.documentTitleOffsetY,
+                    ),
+                    child: pw.Text(
+                      resolvedTitle,
+                      style: pw.TextStyle(
+                        fontSize: titleSize,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
                   ),
-                ),
-                pw.SizedBox(height: 4),
-                pw.Text(
-                  projectName,
-                  style: pw.TextStyle(fontSize: projectSize),
-                ),
-                if (payload.scenes.length > 1) ...[
-                  pw.SizedBox(height: 2),
-                  pw.Text(
-                    '场标题行会在表格内按“1场 / 2场 ...”区分各场镜头',
-                    style: pw.TextStyle(fontSize: math.max(7.2, projectSize - 1.2)),
-                  ),
-                ],
               ],
             ),
           ),
@@ -635,6 +648,44 @@ class PdfExportService {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  pw.Widget _shotSheetSceneHeaderCell({
+    required String label,
+    required double width,
+    required double fontSize,
+  }) {
+    return pw.Container(
+      width: width,
+      height: _shotSheetSceneHeaderHeight,
+      alignment: pw.Alignment.center,
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey200,
+        border: pw.Border(
+          left: const pw.BorderSide(
+            color: PdfColors.grey800,
+            width: 0.95,
+          ),
+          right: const pw.BorderSide(
+            color: PdfColors.grey800,
+            width: 0.95,
+          ),
+          bottom: const pw.BorderSide(
+            color: PdfColors.grey700,
+            width: 0.72,
+          ),
+        ),
+      ),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      child: pw.Text(
+        label,
+        textAlign: pw.TextAlign.center,
+        style: pw.TextStyle(
+          fontSize: fontSize,
+          fontWeight: pw.FontWeight.bold,
+        ),
       ),
     );
   }
@@ -776,7 +827,6 @@ class PdfExportService {
     return fixed?.label ?? payload.fieldLabelsByKey[fieldKey] ?? '自定义列';
   }
 
-
   String _timestamp(DateTime time) {
     return DateFormat('yyyy-MM-dd HH:mm').format(time);
   }
@@ -811,9 +861,6 @@ class PdfExportService {
     );
   }
 
-
-
-
   _ShotSheetLayout _resolveShotSheetLayout({
     required ExportPayload payload,
     required List<String> visibleFields,
@@ -846,7 +893,8 @@ class PdfExportService {
       imageFields: imageFields,
       columnWidths: {
         for (final fieldKey in visibleFields)
-          fieldKey: math.max(1.0, columnWidths[fieldKey] ?? 1.0) * widthFitScale,
+          fieldKey:
+              math.max(1.0, columnWidths[fieldKey] ?? 1.0) * widthFitScale,
       },
     );
     final densityScale = _clampDouble(
@@ -869,7 +917,7 @@ class PdfExportService {
     final averageRowHeight = scaledRowHeights.isEmpty
         ? (hasImage ? 76.0 : 42.0)
         : scaledRowHeights.values.fold<double>(0, (sum, value) => sum + value) /
-            scaledRowHeights.length;
+              scaledRowHeights.length;
     final widthFontBias = _clampDouble(
       math.pow(widthFitScale, 0.18).toDouble(),
       0.92,
@@ -898,11 +946,7 @@ class PdfExportService {
       isDenseTextMode ? 1.2 : 2.0,
       isDenseTextMode ? 2.8 : 4.6,
     );
-    final headerScale = _clampDouble(
-      bodyFontSize / 8.9,
-      0.9,
-      1.08,
-    );
+    final headerScale = _clampDouble(bodyFontSize / 8.9, 0.9, 1.08);
     final hasBrandBlock =
         payload.branding.showDefaultLogo ||
         (payload.branding.logoPath?.trim().isNotEmpty ?? false) ||
@@ -937,36 +981,6 @@ class PdfExportService {
     );
   }
 
-  pw.TableRow _sceneHeaderTableRow(
-    String label, {
-    required int columnCount,
-    required double rowHeight,
-    required double fontSize,
-  }) {
-    return pw.TableRow(
-      decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-      children: [
-        pw.Container(
-          height: rowHeight,
-          alignment: pw.Alignment.centerLeft,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          child: pw.Text(
-            label,
-            style: pw.TextStyle(
-              fontSize: math.max(fontSize, 8.2),
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-        ),
-        for (var index = 1; index < columnCount; index++)
-          pw.Container(
-            height: rowHeight,
-            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          ),
-      ],
-    );
-  }
-
   Map<String, double> _expandShotSheetColumnWidths({
     required List<String> visibleFields,
     required double availableWidth,
@@ -978,7 +992,8 @@ class PdfExportService {
       return widths;
     }
 
-    var remainingWidth = availableWidth -
+    var remainingWidth =
+        availableWidth -
         widths.values.fold<double>(0, (sum, value) => sum + value);
     if (remainingWidth <= 1.0) {
       return widths;
@@ -990,7 +1005,8 @@ class PdfExportService {
     while (remainingWidth > 0.5 && expandable.isNotEmpty) {
       final totalWeight = expandable.fold<double>(
         0,
-        (sum, fieldKey) => sum + _shotSheetColumnExpansionWeight(fieldKey, imageFields),
+        (sum, fieldKey) =>
+            sum + _shotSheetColumnExpansionWeight(fieldKey, imageFields),
       );
       if (totalWeight <= 0) {
         break;
@@ -1005,11 +1021,9 @@ class PdfExportService {
           continue;
         }
         final ratio =
-            _shotSheetColumnExpansionWeight(fieldKey, imageFields) / totalWeight;
-        final delta = math.min(
-          remainingWidth * ratio,
-          maxWidth - current,
-        );
+            _shotSheetColumnExpansionWeight(fieldKey, imageFields) /
+            totalWeight;
+        final delta = math.min(remainingWidth * ratio, maxWidth - current);
         if (delta <= 0) {
           continue;
         }
@@ -1037,7 +1051,11 @@ class PdfExportService {
       return 1.05;
     }
     return switch (fieldKey) {
-      'content' || 'dialogue' || 'notes' || 'sceneExpectation' || 'audio' => 1.95,
+      'content' ||
+      'dialogue' ||
+      'notes' ||
+      'sceneExpectation' ||
+      'audio' => 1.95,
       'shotSize' || 'cameraAngle' || 'cameraMove' || 'cameraRig' => 1.2,
       'durationSec' => 0.9,
       _ => 1.0,
@@ -1083,7 +1101,8 @@ class PdfExportService {
 
     for (final group in sceneGroups) {
       if (group.showHeader) {
-        final wouldOverflow = currentPage.isNotEmpty &&
+        final wouldOverflow =
+            currentPage.isNotEmpty &&
             currentHeight + _shotSheetSceneHeaderHeight > bodyLimit;
         if (wouldOverflow) {
           pages.add(currentPage);
@@ -1181,4 +1200,3 @@ class _ScenePageShotRow extends _ScenePageRow {
 double _clampDouble(double value, double min, double max) {
   return math.min(math.max(value, min), max);
 }
-

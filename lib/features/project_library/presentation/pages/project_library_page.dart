@@ -18,6 +18,7 @@ class ProjectLibraryPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
     final state = ref.watch(projectLibraryProvider);
     final controller = ref.read(projectLibraryProvider.notifier);
 
@@ -121,6 +122,7 @@ class ProjectLibraryPage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _LibraryHeader(
+                isAndroid: isAndroid,
                 query: state.query,
                 onQueryChanged: controller.updateQuery,
                 onCreateProject: createProject,
@@ -134,6 +136,7 @@ class ProjectLibraryPage extends ConsumerWidget {
                   errorMessage: state.errorMessage,
                   projects: state.filteredProjects,
                   hasQuery: state.query.isNotEmpty,
+                  isAndroid: isAndroid,
                   onRetry: controller.loadProjects,
                   onCreateProject: createProject,
                   onOpenExistingProject: openExistingProject,
@@ -236,6 +239,7 @@ class ProjectLibraryPage extends ConsumerWidget {
 
 class _LibraryHeader extends StatelessWidget {
   const _LibraryHeader({
+    required this.isAndroid,
     required this.query,
     required this.onQueryChanged,
     required this.onCreateProject,
@@ -243,6 +247,7 @@ class _LibraryHeader extends StatelessWidget {
     required this.onImportArchive,
   });
 
+  final bool isAndroid;
   final String query;
   final ValueChanged<String> onQueryChanged;
   final Future<void> Function() onCreateProject;
@@ -270,11 +275,6 @@ class _LibraryHeader extends StatelessWidget {
                     '我的项目',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '本地项目包 · 离线可用 · 新建时自主选择保存位置',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
                 ],
               ),
             ),
@@ -295,11 +295,12 @@ class _LibraryHeader extends StatelessWidget {
                     ),
                   ),
                 ),
-                OutlinedButton.icon(
-                  onPressed: onOpenExistingProject,
-                  icon: const Icon(Icons.folder_open_rounded),
-                  label: const Text('打开已有项目'),
-                ),
+                if (!isAndroid)
+                  OutlinedButton.icon(
+                    onPressed: onOpenExistingProject,
+                    icon: const Icon(Icons.folder_open_rounded),
+                    label: const Text('打开已有项目'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: onImportArchive,
                   icon: const Icon(Icons.archive_outlined),
@@ -326,6 +327,7 @@ class _ProjectLibraryContent extends StatelessWidget {
     required this.errorMessage,
     required this.projects,
     required this.hasQuery,
+    required this.isAndroid,
     required this.onRetry,
     required this.onCreateProject,
     required this.onOpenExistingProject,
@@ -338,6 +340,7 @@ class _ProjectLibraryContent extends StatelessWidget {
   final String? errorMessage;
   final List<ProjectLibraryEntry> projects;
   final bool hasQuery;
+  final bool isAndroid;
   final Future<void> Function() onRetry;
   final Future<void> Function() onCreateProject;
   final Future<void> Function() onOpenExistingProject;
@@ -383,22 +386,17 @@ class _ProjectLibraryContent extends StatelessWidget {
       if (!hasQuery) {
         return LayoutBuilder(
           builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 980 ? 2 : 1;
-            return GridView.count(
-              crossAxisCount: columns,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: columns == 2 ? 1.95 : 2.15,
-              children: [
-                _EmptyActionCard(
-                  icon: Icons.add_box_outlined,
-                  title: '创建第一个项目',
-                  description:
-                      '创建新的 VisionDraft 本地项目，下一步直接选择保存位置。',
-                  buttonLabel: '新建项目',
-                  onPressed: onCreateProject,
-                  primary: true,
-                ),
+            final cards = <Widget>[
+              _EmptyActionCard(
+                icon: Icons.add_box_outlined,
+                title: '创建第一个项目',
+                description:
+                    '创建新的 VisionDraft 本地项目，下一步直接选择保存位置。',
+                buttonLabel: '新建项目',
+                onPressed: onCreateProject,
+                primary: true,
+              ),
+              if (!isAndroid)
                 _EmptyActionCard(
                   icon: Icons.folder_open_rounded,
                   title: '打开已有项目',
@@ -407,23 +405,30 @@ class _ProjectLibraryContent extends StatelessWidget {
                   buttonLabel: '打开已有项目',
                   onPressed: onOpenExistingProject,
                 ),
-                _EmptyActionCard(
-                  icon: Icons.archive_outlined,
-                  title: '导入项目包',
-                  description:
-                      '导入 zip 项目包并解压到应用工作目录，适合 Android 与 Windows 之间交换。',
-                  buttonLabel: '导入项目包',
-                  onPressed: onImportArchive,
-                ),
-                const _EmptyInfoCard(
-                  title: '工作方式',
-                  lines: [
-                    '所有项目以独立 .vdraft 目录保存',
-                    'Android 在应用私有目录内编辑项目',
-                    '通过导入、导出和项目包传输交换数据',
-                  ],
-                ),
-              ],
+              _EmptyActionCard(
+                icon: Icons.archive_outlined,
+                title: '导入项目包',
+                description:
+                    '导入 zip 项目包并解压到应用工作目录，适合 Android 与 Windows 之间交换。',
+                buttonLabel: '导入项目包',
+                onPressed: onImportArchive,
+              ),
+              const _EmptyInfoCard(
+                title: '工作方式',
+                lines: [
+                  '所有项目以独立 .vdraft 目录保存',
+                  'Android 在应用私有目录内编辑项目',
+                  '通过导入、导出和项目包传输交换数据',
+                ],
+              ),
+            ];
+            final columns = constraints.maxWidth >= 980 ? 2 : 1;
+            return GridView.count(
+              crossAxisCount: columns,
+              crossAxisSpacing: 14,
+              mainAxisSpacing: 14,
+              childAspectRatio: columns == 2 ? 1.95 : 2.15,
+              children: cards,
             );
           },
         );
@@ -447,14 +452,6 @@ class _ProjectLibraryContent extends StatelessWidget {
                 Text(
                   hasQuery ? '没有匹配的项目' : '还没有项目',
                   style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  hasQuery
-                      ? '换个关键词试试，或者直接创建新项目。'
-                      : '新建项目后会创建一个独立的 .vdraft 项目目录。',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
@@ -537,16 +534,13 @@ class _CreateProjectCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              Text('新建项目', style: theme.textTheme.titleLarge),
-              const SizedBox(height: 6),
               Expanded(
-                child: Text(
-                  defaultTargetPlatform == TargetPlatform.android
-                      ? '创建新项目后会写入应用私有工作目录，之后可导出为项目包。'
-                      : '创建新的 VisionDraft 本地项目，下一步会先让你选择保存位置。',
-                  style: theme.textTheme.bodyMedium,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '创建项目',
+                    style: theme.textTheme.titleLarge,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
