@@ -89,7 +89,11 @@ dist/windows/vision_draft.exe
 安装器脚本：
 
 ```text
-scripts/visiondraft_setup.iss
+scripts/package_windows_release.ps1
+```
+
+```text
+scripts/publish_github_release.ps1
 ```
 
 ## 项目包格式

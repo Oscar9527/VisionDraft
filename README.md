@@ -86,10 +86,16 @@ Entry executable:
 dist/windows/vision_draft.exe
 ```
 
-Installer script:
+Release packaging:
 
 ```text
-scripts/visiondraft_setup.iss
+scripts/package_windows_release.ps1
+```
+
+GitHub release publishing:
+
+```text
+scripts/publish_github_release.ps1
 ```
 
 ## Project Bundle Format
