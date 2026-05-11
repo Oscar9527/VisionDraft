@@ -10,6 +10,7 @@ class WorkspaceHeader extends StatelessWidget {
     required this.activeSection,
     required this.onBackPressed,
     required this.onSectionSelected,
+    required this.onProjectPackagePressed,
     required this.onExportPressed,
   });
 
@@ -17,6 +18,7 @@ class WorkspaceHeader extends StatelessWidget {
   final WorkspaceSection activeSection;
   final VoidCallback onBackPressed;
   final ValueChanged<WorkspaceSection> onSectionSelected;
+  final VoidCallback onProjectPackagePressed;
   final VoidCallback onExportPressed;
 
   @override
@@ -78,6 +80,12 @@ class WorkspaceHeader extends StatelessWidget {
             const SizedBox(width: 4),
             const ThemeModeButton(compact: true),
             const SizedBox(width: 4),
+            IconButton(
+              tooltip: '项目包',
+              onPressed: onProjectPackagePressed,
+              icon: const Icon(Icons.archive_outlined, size: 18),
+            ),
+            const SizedBox(width: 2),
             OutlinedButton.icon(
               onPressed: onExportPressed,
               icon: const Icon(Icons.ios_share_rounded, size: 16),

@@ -90,6 +90,30 @@ class DriftProjectLibraryRepository implements ProjectLibraryRepository {
   }
 
   @override
+  Future<ProjectLibraryEntry> importProjectArchive(String archivePath) async {
+    final archiveFile = File(archivePath);
+    if (!await archiveFile.exists()) {
+      throw const FileSystemException('项目包不存在');
+    }
+
+    final paths = await storageService.resolve();
+    final bundle = await bundleService.importFromZip(
+      zipFile: archiveFile,
+      targetDirectory: paths.projectsDirectory,
+    );
+    final db = await indexDatabaseFactory();
+    try {
+      await _upsertBundle(db, bundle);
+      final row = await (db.select(db.recentProjects)
+            ..where((tbl) => tbl.id.equals(bundle.id)))
+          .getSingle();
+      return _mapRow(row);
+    } finally {
+      await db.close();
+    }
+  }
+
+  @override
   Future<void> deleteProject(String projectId) async {
     try {
       await workspaceRepository.compactProject(projectId);

@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -23,6 +24,12 @@ class ExportPage extends ConsumerStatefulWidget {
 }
 
 class _ExportPageState extends ConsumerState<ExportPage> {
+  static const _pdfTypeGroup = XTypeGroup(label: 'PDF', extensions: ['pdf']);
+  static const _excelTypeGroup = XTypeGroup(
+    label: 'Excel',
+    extensions: ['xlsx'],
+  );
+
   final Set<ExportDocumentType> _busyTypes = <ExportDocumentType>{};
   late final TextEditingController _brandNameController;
   late final TextEditingController _brandTaglineController;
@@ -34,21 +41,11 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   bool _fitPreviewToCanvas = true;
   double _previewZoom = 1.0;
 
-  static const _pdfTypeGroup = XTypeGroup(label: 'PDF', extensions: ['pdf']);
-  static const _excelTypeGroup = XTypeGroup(
-    label: 'Excel',
-    extensions: ['xlsx'],
-  );
-  static const _imageTypeGroup = XTypeGroup(
-    label: 'Images',
-    extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'],
-  );
-
   @override
   void initState() {
     super.initState();
     _brandNameController = TextEditingController(text: 'VisionDraft');
-    _brandTaglineController = TextEditingController(text: '影视策划与前置统筹');
+    _brandTaglineController = TextEditingController(text: '影视策划与前期统筹');
     _brandNameController.addListener(_handleBrandingChanged);
     _brandTaglineController.addListener(_handleBrandingChanged);
   }
@@ -66,7 +63,6 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   Widget build(BuildContext context) {
     final snapshot = ref.watch(workspaceControllerProvider(widget.projectId));
     final gridSession = ref.watch(editorGridSessionProvider(widget.projectId));
-
     final previewFilename = _previewFilenameFor(_selectedType, snapshot);
     final previewKey = [
       _selectedType.name,
@@ -100,7 +96,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
               _selectedType = type;
             });
           },
-          onGenerate: () => _exportDocument(_selectedType),
+          onExportPdf: () => _exportDocument(_selectedType),
           onExportExcel: _selectedType == ExportDocumentType.shotSheet
               ? () => _exportExcel(snapshot, gridSession)
               : null,
@@ -135,7 +131,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         if (compact) {
           return Column(
             children: [
-              SizedBox(height: 720, child: sidebar),
+              SizedBox(height: 760, child: sidebar),
               const SizedBox(height: 12),
               Expanded(child: preview),
             ],
@@ -145,7 +141,7 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: 340, child: sidebar),
+            SizedBox(width: 356, child: sidebar),
             const SizedBox(width: 12),
             Expanded(child: preview),
           ],
@@ -233,15 +229,12 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   }
 
   Future<void> _pickBrandLogo() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [_imageTypeGroup],
-      confirmButtonText: '选择 Logo',
-    );
-    if (file == null || file.path.isEmpty) {
+    final filePath = await ref.read(mediaImportServiceProvider).pickImageFile();
+    if (filePath == null || filePath.isEmpty) {
       return;
     }
     setState(() {
-      _brandLogoPath = file.path;
+      _brandLogoPath = filePath;
       _showDefaultBrandLogo = false;
     });
   }
@@ -274,34 +267,34 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       _brandLogoPath = null;
       _showDefaultBrandLogo = true;
       _brandNameController.text = 'VisionDraft';
-      _brandTaglineController.text = '影视策划与前置统筹';
+      _brandTaglineController.text = '影视策划与前期统筹';
     });
   }
 
   Future<void> _exportDocument(ExportDocumentType type) async {
-    await _runDocumentAction(
+    await _runPdfAction(
       type,
       action: (bytes, payload, filename) async {
-        final file = await _saveFileAs(
+        final result = await ref.read(documentOutputServiceProvider).saveDocument(
           bytes: bytes,
           filename: filename,
           initialDirectory: payload.bundle.rootPath,
           typeGroup: _pdfTypeGroup,
           confirmButtonText: '导出 PDF',
         );
-        if (file == null || !mounted) {
+        if (result == null || !mounted) {
           return;
         }
         setState(() {
-          _lastSavedPath = file.path;
+          _lastSavedPath = result.file.path;
         });
-        _showSnackBar('已导出到 ${file.path}');
+        _showSnackBar('已导出到 ${result.file.path}');
       },
     );
   }
 
   Future<void> _printDocument(ExportDocumentType type) async {
-    await _runDocumentAction(
+    await _runPdfAction(
       type,
       action: (bytes, _, filename) async {
         await ref.read(printServiceProvider).layoutPdf(bytes, name: filename);
@@ -311,33 +304,21 @@ class _ExportPageState extends ConsumerState<ExportPage> {
   }
 
   Future<void> _shareDocument(ExportDocumentType type) async {
-    await _runDocumentAction(
+    await _runPdfAction(
       type,
       action: (bytes, payload, filename) async {
-        if (defaultTargetPlatform == TargetPlatform.windows) {
-          final file = await _saveFileAs(
-            bytes: bytes,
-            filename: filename,
-            initialDirectory: payload.bundle.rootPath,
-            typeGroup: _pdfTypeGroup,
-            confirmButtonText: '保存并分享',
-          );
-          if (file == null || !mounted) {
-            return;
-          }
-          setState(() {
-            _lastSavedPath = file.path;
-          });
-          _showSnackBar('已保存到 ${file.path}');
-          return;
-        }
-
-        await ref.read(printServiceProvider).sharePdf(
-              bytes,
+        final result = await ref.read(documentOutputServiceProvider).shareDocument(
+              bytes: bytes,
               filename: filename,
               subject: '${payload.bundle.name} - ${_titleForType(type)}',
-              body: '来自 VisionDraft 的导出文件',
+              text: '来自 VisionDraft 的导出文件',
             );
+        if (result == null || !mounted) {
+          return;
+        }
+        setState(() {
+          _lastSavedPath = result.file.path;
+        });
         _showSnackBar('已调用系统分享');
       },
     );
@@ -359,23 +340,24 @@ class _ExportPageState extends ConsumerState<ExportPage> {
       _showSnackBar('Excel 导出失败：未生成文件内容', isError: true);
       return;
     }
-    final file = await _saveFileAs(
+
+    final result = await ref.read(documentOutputServiceProvider).saveDocument(
       bytes: bytes,
       filename: filename,
       initialDirectory: snapshot.bundle.rootPath,
       typeGroup: _excelTypeGroup,
       confirmButtonText: '导出 Excel',
     );
-    if (file == null || !mounted) {
+    if (result == null || !mounted) {
       return;
     }
     setState(() {
-      _lastSavedPath = file.path;
+      _lastSavedPath = result.file.path;
     });
-    _showSnackBar('已导出到 ${file.path}');
+    _showSnackBar('已导出到 ${result.file.path}');
   }
 
-  Future<void> _runDocumentAction(
+  Future<void> _runPdfAction(
     ExportDocumentType type, {
     required Future<void> Function(
       Uint8List bytes,
@@ -410,29 +392,6 @@ class _ExportPageState extends ConsumerState<ExportPage> {
         });
       }
     }
-  }
-
-  Future<File?> _saveFileAs({
-    required List<int> bytes,
-    required String filename,
-    required String initialDirectory,
-    required XTypeGroup typeGroup,
-    required String confirmButtonText,
-  }) async {
-    final saveLocation = await getSaveLocation(
-      acceptedTypeGroups: [typeGroup],
-      initialDirectory: initialDirectory,
-      suggestedName: filename,
-      confirmButtonText: confirmButtonText,
-      canCreateDirectories: true,
-    );
-    if (saveLocation == null) {
-      return null;
-    }
-    final file = File(saveLocation.path);
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
   }
 
   String _previewFilenameFor(
@@ -493,7 +452,7 @@ class _ExportSidebar extends StatelessWidget {
     required this.brandLogoPath,
     required this.showDefaultBrandLogo,
     required this.onTypeSelected,
-    required this.onGenerate,
+    required this.onExportPdf,
     required this.onExportExcel,
     required this.onPrint,
     required this.onShare,
@@ -515,7 +474,7 @@ class _ExportSidebar extends StatelessWidget {
   final String? brandLogoPath;
   final bool showDefaultBrandLogo;
   final ValueChanged<ExportDocumentType> onTypeSelected;
-  final VoidCallback onGenerate;
+  final VoidCallback onExportPdf;
   final VoidCallback? onExportExcel;
   final VoidCallback onPrint;
   final VoidCallback onShare;
@@ -537,7 +496,7 @@ class _ExportSidebar extends StatelessWidget {
           Text('导出与打印', style: theme.textTheme.headlineSmall),
           const SizedBox(height: 4),
           Text(
-            '右侧预览与最终导出保持一致。每次导出都会先让你选择保存位置。',
+            'Android 会保存到临时导出目录并调用系统分享；Windows 会弹出保存位置。',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -559,14 +518,14 @@ class _ExportSidebar extends StatelessWidget {
                         ExportDocumentType.shootingPlan =>
                           '${snapshot.planBoard.sections.length} 个区块，含未规划镜头',
                         ExportDocumentType.callSheet =>
-                          '${snapshot.callSheet.sectionSummaries.length} 条摘要，现场执行稿',
+                          '${snapshot.callSheet.sectionSummaries.length} 条摘要，现场执行通告',
                       },
                       icon: switch (type) {
                         ExportDocumentType.shotSheet => Icons.table_chart_outlined,
                         ExportDocumentType.shootingPlan => Icons.schedule_outlined,
                         ExportDocumentType.callSheet => Icons.description_outlined,
                       },
-                      selected: type == selectedType,
+                      selected: selectedType == type,
                       onTap: () => onTypeSelected(type),
                     ),
                     const SizedBox(height: 8),
@@ -575,7 +534,7 @@ class _ExportSidebar extends StatelessWidget {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: isBusy ? null : onGenerate,
+                      onPressed: isBusy ? null : onExportPdf,
                       icon: isBusy
                           ? const SizedBox(
                               width: 16,
@@ -637,10 +596,13 @@ class _ExportSidebar extends StatelessWidget {
                   const SizedBox(height: 16),
                   _InfoRow(label: '项目', value: snapshot.bundle.name),
                   _InfoRow(label: '镜头数', value: '${snapshot.shots.length}'),
-                  _InfoRow(label: '计划区块', value: '${snapshot.planBoard.sections.length}'),
+                  _InfoRow(
+                    label: '计划区块',
+                    value: '${snapshot.planBoard.sections.length}',
+                  ),
                   _InfoRow(
                     label: '最近导出',
-                    value: lastSavedPath == null ? '暂无' : File(lastSavedPath!).path,
+                    value: lastSavedPath ?? '暂无',
                     multiline: true,
                   ),
                 ],
@@ -802,7 +764,7 @@ class _PreviewControlCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '适应模式用于检查整页布局，手动模式用于放大查看文字、线条和图片格。',
+              '适应模式用于检查整页版式，手动模式用于放大查看文字、线条和图片细节。',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -857,172 +819,6 @@ class _PreviewControlCard extends StatelessWidget {
   }
 }
 
-class _RasterPreviewPane extends StatefulWidget {
-  const _RasterPreviewPane({
-    super.key,
-    required this.previewToken,
-    required this.buildPreview,
-    required this.fitToCanvas,
-    required this.zoom,
-  });
-
-  final String previewToken;
-  final Future<Uint8List> Function() buildPreview;
-  final bool fitToCanvas;
-  final double zoom;
-
-  @override
-  State<_RasterPreviewPane> createState() => _RasterPreviewPaneState();
-}
-
-class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
-  late Future<List<_PreviewPageRaster>> _pagesFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _pagesFuture = _loadPages();
-  }
-
-  @override
-  void didUpdateWidget(covariant _RasterPreviewPane oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.previewToken != widget.previewToken) {
-      _pagesFuture = _loadPages();
-    }
-  }
-
-  Future<List<_PreviewPageRaster>> _loadPages() async {
-    final document = await widget.buildPreview();
-    final pages = <_PreviewPageRaster>[];
-    await for (final raster in Printing.raster(document, dpi: 144)) {
-      pages.add(
-        _PreviewPageRaster(
-          bytes: await raster.toPng(),
-          width: raster.width.toDouble(),
-          height: raster.height.toDouble(),
-        ),
-      );
-    }
-    return pages;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return FutureBuilder<List<_PreviewPageRaster>>(
-      future: _pagesFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text('预览生成失败：${snapshot.error}'),
-            ),
-          );
-        }
-        final pages = snapshot.data ?? const <_PreviewPageRaster>[];
-        if (pages.isEmpty) {
-          return const Center(child: Text('暂无预览'));
-        }
-
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final canvasWidth = math.max(1.0, constraints.maxWidth - 32);
-            final canvasHeight = math.max(1.0, constraints.maxHeight - 32);
-            final widthFitScale = canvasWidth / pages.first.width;
-            final heightFitScale = canvasHeight / pages.first.height;
-            final fitScale = math.min(widthFitScale, heightFitScale);
-            final effectiveScale = widget.fitToCanvas
-                ? fitScale
-                : fitScale * widget.zoom;
-
-            return InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4,
-              constrained: false,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final page in pages) ...[
-                      Container(
-                        width: page.width * effectiveScale,
-                        height: page.height * effectiveScale,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(
-                              color: theme.colorScheme.shadow.withValues(alpha: 0.12),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Image.memory(
-                            page.bytes,
-                            width: page.width * effectiveScale,
-                            height: page.height * effectiveScale,
-                            fit: BoxFit.fitWidth,
-                            filterQuality: FilterQuality.high,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _PreviewPageRaster {
-  const _PreviewPageRaster({
-    required this.bytes,
-    required this.width,
-    required this.height,
-  });
-
-  final Uint8List bytes;
-  final double width;
-  final double height;
-}
-
-class _PanelFrame extends StatelessWidget {
-  const _PanelFrame({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: theme.dividerColor),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: child,
-      ),
-    );
-  }
-}
-
 class _BrandingCard extends StatelessWidget {
   const _BrandingCard({
     required this.logoPath,
@@ -1052,13 +848,13 @@ class _BrandingCard extends StatelessWidget {
     final stateLabel = hasCustomLogo
         ? '自定义品牌'
         : showDefaultLogo
-            ? '默认品牌'
-            : '空白品牌';
+        ? '默认品牌'
+        : '空白品牌';
     final stateDescription = hasCustomLogo
         ? '使用你的自定义 Logo，导出时会按当前品牌名称和文案显示。'
         : showDefaultLogo
-            ? '使用 VisionDraft 默认图标，可继续修改名称和文案。'
-            : '当前不显示 Logo。名称和品牌文案也留空时，导出顶部会保持空白。';
+        ? '使用 VisionDraft 默认图标，可继续修改名称和文案。'
+        : '当前不显示 Logo。名称和品牌文案也留空时，导出顶部会保持空白。';
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1127,7 +923,7 @@ class _BrandingCard extends StatelessWidget {
                       if (!showsAnyLogo && !hasBrandName && !hasBrandTagline) ...[
                         const SizedBox(height: 8),
                         Text(
-                          '当前导出顶部品牌区为空白。',
+                          '当前导出顶部品牌区为纯空白。',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -1150,7 +946,7 @@ class _BrandingCard extends StatelessWidget {
               controller: brandTaglineController,
               decoration: const InputDecoration(
                 labelText: '品牌文案',
-                hintText: '影视策划与前置统筹',
+                hintText: '影视策划与前期统筹',
                 isDense: true,
               ),
             ),
@@ -1208,6 +1004,294 @@ class _DefaultLogoBox extends StatelessWidget {
           height: 54,
           fit: BoxFit.cover,
         ),
+      ),
+    );
+  }
+}
+
+class _RasterPreviewPane extends StatefulWidget {
+  const _RasterPreviewPane({
+    super.key,
+    required this.previewToken,
+    required this.buildPreview,
+    required this.fitToCanvas,
+    required this.zoom,
+  });
+
+  final String previewToken;
+  final Future<Uint8List> Function() buildPreview;
+  final bool fitToCanvas;
+  final double zoom;
+
+  @override
+  State<_RasterPreviewPane> createState() => _RasterPreviewPaneState();
+}
+
+class _RasterPreviewPaneState extends State<_RasterPreviewPane> {
+  late Future<List<_PreviewPageRaster>> _pagesFuture;
+  final TransformationController _previewTransformController =
+      TransformationController();
+  int _currentPageIndex = 0;
+  double _wheelDeltaAccumulator = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pagesFuture = _loadPages();
+  }
+
+  @override
+  void dispose() {
+    _previewTransformController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RasterPreviewPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.previewToken != widget.previewToken) {
+      _currentPageIndex = 0;
+      _wheelDeltaAccumulator = 0;
+      _resetPreviewTransform();
+      _pagesFuture = _loadPages();
+    }
+  }
+
+  void _resetPreviewTransform() {
+    _previewTransformController.value = Matrix4.identity();
+  }
+
+  void _changePage(int delta, int pageCount) {
+    if (pageCount <= 1) {
+      return;
+    }
+    final nextIndex = (_currentPageIndex + delta).clamp(0, pageCount - 1);
+    if (nextIndex == _currentPageIndex) {
+      return;
+    }
+    setState(() {
+      _currentPageIndex = nextIndex;
+      _wheelDeltaAccumulator = 0;
+    });
+    _resetPreviewTransform();
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event, int pageCount) {
+    if (event is! PointerScrollEvent || pageCount <= 1) {
+      return;
+    }
+    final deltaY = event.scrollDelta.dy;
+    if (deltaY == 0) {
+      return;
+    }
+    if (_wheelDeltaAccumulator != 0 &&
+        _wheelDeltaAccumulator.isNegative != deltaY.isNegative) {
+      _wheelDeltaAccumulator = 0;
+    }
+    _wheelDeltaAccumulator += deltaY;
+    const threshold = 36.0;
+    if (_wheelDeltaAccumulator.abs() < threshold) {
+      return;
+    }
+    _changePage(_wheelDeltaAccumulator > 0 ? 1 : -1, pageCount);
+  }
+
+  Future<List<_PreviewPageRaster>> _loadPages() async {
+    final document = await widget.buildPreview();
+    final pages = <_PreviewPageRaster>[];
+    await for (final raster in Printing.raster(document, dpi: 144)) {
+      pages.add(
+        _PreviewPageRaster(
+          bytes: await raster.toPng(),
+          width: raster.width.toDouble(),
+          height: raster.height.toDouble(),
+        ),
+      );
+    }
+    return pages;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<List<_PreviewPageRaster>>(
+      future: _pagesFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text('预览生成失败：${snapshot.error}'),
+            ),
+          );
+        }
+        final pages = snapshot.data ?? const <_PreviewPageRaster>[];
+        if (pages.isEmpty) {
+          return const Center(child: Text('暂无预览'));
+        }
+
+        final currentPageIndex = _currentPageIndex.clamp(0, pages.length - 1);
+        final page = pages[currentPageIndex];
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final canvasWidth = math.max(1.0, constraints.maxWidth - 32);
+            final canvasHeight = math.max(1.0, constraints.maxHeight - 32);
+            final widthFitScale = canvasWidth / page.width;
+            final heightFitScale = canvasHeight / page.height;
+            final fitScale = math.min(widthFitScale, heightFitScale);
+            final effectiveScale = widget.fitToCanvas
+                ? fitScale
+                : fitScale * widget.zoom;
+            final pageWidth = page.width * effectiveScale;
+            final pageHeight = page.height * effectiveScale;
+
+            return Listener(
+              behavior: HitTestBehavior.opaque,
+              onPointerSignal: (event) =>
+                  _handlePointerSignal(event, pages.length),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: InteractiveViewer(
+                      transformationController: _previewTransformController,
+                      constrained: false,
+                      scaleEnabled: false,
+                      panEnabled: !widget.fitToCanvas,
+                      boundaryMargin: const EdgeInsets.all(32),
+                      minScale: 1,
+                      maxScale: 1,
+                      child: SizedBox(
+                        width: math.max(constraints.maxWidth, pageWidth + 32),
+                        height: math.max(constraints.maxHeight, pageHeight + 32),
+                        child: Center(
+                          child: Container(
+                            width: pageWidth,
+                            height: pageHeight,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: theme.colorScheme.shadow.withValues(alpha: 0.12),
+                                  blurRadius: 18,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.memory(
+                                page.bytes,
+                                width: pageWidth,
+                                height: pageHeight,
+                                fit: BoxFit.fitWidth,
+                                filterQuality: FilterQuality.high,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (pages.length > 1)
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surface.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: '上一页',
+                                onPressed: currentPageIndex > 0
+                                    ? () => _changePage(-1, pages.length)
+                                    : null,
+                                icon: const Icon(Icons.chevron_left_rounded),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 28,
+                                  height: 28,
+                                ),
+                                padding: EdgeInsets.zero,
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                child: Text(
+                                  '${currentPageIndex + 1} / ${pages.length}',
+                                  style: theme.textTheme.labelMedium,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: '下一页',
+                                onPressed: currentPageIndex < pages.length - 1
+                                    ? () => _changePage(1, pages.length)
+                                    : null,
+                                icon: const Icon(Icons.chevron_right_rounded),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 28,
+                                  height: 28,
+                                ),
+                                padding: EdgeInsets.zero,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _PreviewPageRaster {
+  const _PreviewPageRaster({
+    required this.bytes,
+    required this.width,
+    required this.height,
+  });
+
+  final Uint8List bytes;
+  final double width;
+  final double height;
+}
+
+class _PanelFrame extends StatelessWidget {
+  const _PanelFrame({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: child,
       ),
     );
   }

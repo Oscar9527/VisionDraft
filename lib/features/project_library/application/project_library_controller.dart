@@ -97,6 +97,13 @@ class ProjectLibraryController extends Notifier<ProjectLibraryState> {
     return entry;
   }
 
+  Future<ProjectLibraryEntry> importProjectArchive(String archivePath) async {
+    final repo = ref.read(projectLibraryRepositoryProvider);
+    final entry = await repo.importProjectArchive(archivePath);
+    await loadProjects();
+    return entry;
+  }
+
   Future<void> deleteProject(String projectId) async {
     final repo = ref.read(projectLibraryRepositoryProvider);
     await repo.deleteProject(projectId);

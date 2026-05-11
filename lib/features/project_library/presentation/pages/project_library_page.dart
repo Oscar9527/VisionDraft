@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -32,9 +32,9 @@ class ProjectLibraryPage extends ConsumerWidget {
         return;
       }
 
-      final parentDirectory = await getDirectoryPath(
+      final pathService = ref.read(platformPathServiceProvider);
+      final parentDirectory = await pathService.pickProjectParentDirectory(
         confirmButtonText: '选择项目保存位置',
-        canCreateDirectories: true,
       );
       if (parentDirectory == null || parentDirectory.isEmpty) {
         return;
@@ -60,8 +60,16 @@ class ProjectLibraryPage extends ConsumerWidget {
     }
 
     Future<void> openExistingProject() async {
-      final bundlePath = await getDirectoryPath(confirmButtonText: '打开已有项目');
+      final pathService = ref.read(platformPathServiceProvider);
+      final bundlePath = await pathService.pickExistingBundleDirectory(
+        confirmButtonText: '打开已有项目',
+      );
       if (bundlePath == null || bundlePath.isEmpty) {
+        if (defaultTargetPlatform == TargetPlatform.android && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Android 端请通过“导入项目包”打开现有项目。')),
+          );
+        }
         return;
       }
 
@@ -81,6 +89,30 @@ class ProjectLibraryPage extends ConsumerWidget {
       }
     }
 
+    Future<void> importProjectArchive() async {
+      final archivePath = await ref
+          .read(mediaImportServiceProvider)
+          .pickProjectArchive();
+      if (archivePath == null || archivePath.isEmpty) {
+        return;
+      }
+
+      try {
+        final entry = await controller.importProjectArchive(archivePath);
+        if (!context.mounted) {
+          return;
+        }
+        context.go('/projects/${entry.id}/editor');
+      } catch (error) {
+        if (!context.mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('导入项目包失败：$error')));
+      }
+    }
+
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -93,6 +125,7 @@ class ProjectLibraryPage extends ConsumerWidget {
                 onQueryChanged: controller.updateQuery,
                 onCreateProject: createProject,
                 onOpenExistingProject: openExistingProject,
+                onImportArchive: importProjectArchive,
               ),
               const SizedBox(height: 10),
               Expanded(
@@ -104,6 +137,7 @@ class ProjectLibraryPage extends ConsumerWidget {
                   onRetry: controller.loadProjects,
                   onCreateProject: createProject,
                   onOpenExistingProject: openExistingProject,
+                  onImportArchive: importProjectArchive,
                   onOpenProject: openProject,
                   onDeleteProject: (project) async {
                     final confirmed =
@@ -148,9 +182,7 @@ class ProjectLibraryPage extends ConsumerWidget {
                         return;
                       }
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('删除失败，请关闭占用该项目文件的窗口后重试。\n$error'),
-                        ),
+                        SnackBar(content: Text('删除失败：$error')),
                       );
                     }
                   },
@@ -208,12 +240,14 @@ class _LibraryHeader extends StatelessWidget {
     required this.onQueryChanged,
     required this.onCreateProject,
     required this.onOpenExistingProject,
+    required this.onImportArchive,
   });
 
   final String query;
   final ValueChanged<String> onQueryChanged;
   final Future<void> Function() onCreateProject;
   final Future<void> Function() onOpenExistingProject;
+  final Future<void> Function() onImportArchive;
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +300,11 @@ class _LibraryHeader extends StatelessWidget {
                   icon: const Icon(Icons.folder_open_rounded),
                   label: const Text('打开已有项目'),
                 ),
+                OutlinedButton.icon(
+                  onPressed: onImportArchive,
+                  icon: const Icon(Icons.archive_outlined),
+                  label: const Text('导入项目包'),
+                ),
                 const ThemeModeButton(),
                 FilledButton.icon(
                   onPressed: onCreateProject,
@@ -290,6 +329,7 @@ class _ProjectLibraryContent extends StatelessWidget {
     required this.onRetry,
     required this.onCreateProject,
     required this.onOpenExistingProject,
+    required this.onImportArchive,
     required this.onOpenProject,
     required this.onDeleteProject,
   });
@@ -301,6 +341,7 @@ class _ProjectLibraryContent extends StatelessWidget {
   final Future<void> Function() onRetry;
   final Future<void> Function() onCreateProject;
   final Future<void> Function() onOpenExistingProject;
+  final Future<void> Function() onImportArchive;
   final void Function(String projectId) onOpenProject;
   final Future<void> Function(ProjectLibraryEntry project) onDeleteProject;
 
@@ -319,7 +360,10 @@ class _ProjectLibraryContent extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('项目库加载失败', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  '项目库加载失败',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 12),
                 SelectableText(errorMessage!),
                 const SizedBox(height: 16),
@@ -349,7 +393,8 @@ class _ProjectLibraryContent extends StatelessWidget {
                 _EmptyActionCard(
                   icon: Icons.add_box_outlined,
                   title: '创建第一个项目',
-                  description: '创建新的 VisionDraft 本地项目，下一步直接选择保存位置。',
+                  description:
+                      '创建新的 VisionDraft 本地项目，下一步直接选择保存位置。',
                   buttonLabel: '新建项目',
                   onPressed: onCreateProject,
                   primary: true,
@@ -357,21 +402,26 @@ class _ProjectLibraryContent extends StatelessWidget {
                 _EmptyActionCard(
                   icon: Icons.folder_open_rounded,
                   title: '打开已有项目',
-                  description: '选择任意 .vdraft 项目目录，注册到项目库后立刻继续编辑。',
+                  description:
+                      '选择任意 .vdraft 项目目录，注册到项目库后立刻继续编辑。',
                   buttonLabel: '打开已有项目',
                   onPressed: onOpenExistingProject,
                 ),
-                const _EmptyInfoCard(
-                  title: '本地优先',
-                  lines: [
-                    '所有项目以独立 .vdraft 目录保存',
-                    '新建项目时每次手动选择保存位置',
-                    '关闭软件后数据仍保留在本地',
-                  ],
+                _EmptyActionCard(
+                  icon: Icons.archive_outlined,
+                  title: '导入项目包',
+                  description:
+                      '导入 zip 项目包并解压到应用工作目录，适合 Android 与 Windows 之间交换。',
+                  buttonLabel: '导入项目包',
+                  onPressed: onImportArchive,
                 ),
                 const _EmptyInfoCard(
-                  title: '工作流建议',
-                  lines: ['先建立项目并导入参考图', '在分镜制作页完成镜头表', '再进入拍摄计划和导出通告'],
+                  title: '工作方式',
+                  lines: [
+                    '所有项目以独立 .vdraft 目录保存',
+                    'Android 在应用私有目录内编辑项目',
+                    '通过导入、导出和项目包传输交换数据',
+                  ],
                 ),
               ],
             );
@@ -491,7 +541,9 @@ class _CreateProjectCard extends StatelessWidget {
               const SizedBox(height: 6),
               Expanded(
                 child: Text(
-                  '创建新的 VisionDraft 本地项目，下一步会先让你选择保存位置。',
+                  defaultTargetPlatform == TargetPlatform.android
+                      ? '创建新项目后会写入应用私有工作目录，之后可导出为项目包。'
+                      : '创建新的 VisionDraft 本地项目，下一步会先让你选择保存位置。',
                   style: theme.textTheme.bodyMedium,
                   maxLines: 4,
                   overflow: TextOverflow.ellipsis,
@@ -579,7 +631,11 @@ class _EmptyActionCard extends StatelessWidget {
           else
             OutlinedButton.icon(
               onPressed: onPressed,
-              icon: const Icon(Icons.folder_open_rounded),
+              icon: Icon(
+                icon == Icons.archive_outlined
+                    ? Icons.archive_outlined
+                    : Icons.folder_open_rounded,
+              ),
               label: Text(buttonLabel),
             ),
         ],

@@ -1,4 +1,6 @@
 ﻿import 'package:flutter/material.dart';
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:collection/collection.dart';
 
@@ -10,6 +12,7 @@ import '../../../project_workspace/domain/models/board_preset.dart';
 import '../../../project_workspace/domain/models/column_preset.dart';
 import '../../../project_workspace/domain/models/column_template.dart';
 import '../../../project_workspace/domain/models/custom_column_definition.dart';
+import '../../../project_workspace/domain/models/asset_ref.dart';
 import '../../../project_workspace/domain/models/shot_record.dart';
 import '../../../project_workspace/domain/models/shot_fields.dart';
 import '../../../project_workspace/domain/models/storyboard_scene.dart';
@@ -339,6 +342,12 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                 itemBuilder: (context, index) {
                   final shot = snapshot.shots[index];
                   return ListTile(
+                    onTap: () => _openMobileShotEditor(
+                      context,
+                      controller,
+                      snapshot,
+                      shot,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -352,7 +361,14 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: Text('${shot.durationSec}s'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('${shot.durationSec}s'),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
                   );
                 },
               ),
@@ -1584,6 +1600,470 @@ class _StoryboardEditorPageState extends ConsumerState<StoryboardEditorPage> {
                   ),
                 ],
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openMobileShotEditor(
+    BuildContext context,
+    ProjectWorkspaceController controller,
+    snapshot,
+    ShotRecord shot,
+  ) async {
+    final fixedOptions = snapshot.fixedFieldCustomOptions;
+    final customColumns = snapshot.customColumns;
+    final sceneItems = [...snapshot.scenes]
+      ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+
+    String sceneLabel(StoryboardScene scene) {
+      final base = '${scene.displayNumber(scene.sortIndex + 1)}场';
+      return scene.name.trim().isEmpty ? base : '$base ${scene.name.trim()}';
+    }
+
+    Widget buildTextField({
+      required String label,
+      required String initialValue,
+      required Future<void> Function(String value) onCommit,
+      int minLines = 1,
+      int maxLines = 1,
+      TextInputType? keyboardType,
+    }) {
+      final textController = TextEditingController(text: initialValue);
+      return TextField(
+        controller: textController,
+        minLines: minLines,
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label),
+        onSubmitted: (value) => onCommit(value.trim()),
+        onEditingComplete: () => onCommit(textController.text.trim()),
+      );
+    }
+
+    Future<void> pickImage(String targetField) async {
+      final path = await ref.read(mediaImportServiceProvider).pickImageFile();
+      if (path == null || path.isEmpty) {
+        return;
+      }
+      await controller.importAsset(
+        shotId: shot.id,
+        targetField: targetField,
+        sourcePath: path,
+        assetMode: AssetMode.managed,
+      );
+    }
+
+    Widget buildImageField({
+      required String label,
+      required String fieldKey,
+      required AssetRef? asset,
+    }) {
+      final previewPath = asset?.uri;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 8),
+          Container(
+            height: 160,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Theme.of(context).dividerColor),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.22,
+                  ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: previewPath == null || previewPath.isEmpty
+                ? Center(
+                    child: Text(
+                      '未设置图片',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  )
+                : Image.file(
+                    File(previewPath),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Center(
+                      child: Text(
+                        '图片不可用',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => pickImage(fieldKey),
+                icon: const Icon(Icons.image_outlined),
+                label: Text(asset == null ? '导入图片' : '替换图片'),
+              ),
+              if (asset != null)
+                OutlinedButton.icon(
+                  onPressed: () => controller.updateShotField(
+                    shotId: shot.id,
+                    fieldKey: fieldKey,
+                    value: null,
+                  ),
+                  icon: const Icon(Icons.clear_rounded),
+                  label: const Text('清除'),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.92,
+              maxChildSize: 0.96,
+              minChildSize: 0.7,
+              builder: (context, scrollController) {
+                return SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      top: 12,
+                      bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '镜头 ${shot.shotNo.isEmpty ? shot.orderIndex + 1 : shot.shotNo}',
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => Navigator.of(sheetContext).pop(),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: ListView(
+                            controller: scrollController,
+                            children: [
+                              DropdownButtonFormField<String>(
+                                initialValue: shot.sceneId,
+                                decoration: const InputDecoration(labelText: '所属场'),
+                                items: sceneItems
+                                    .map(
+                                      (scene) => DropdownMenuItem<String>(
+                                        value: scene.id,
+                                        child: Text(sceneLabel(scene)),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) async {
+                                  if (value == null || value == shot.sceneId) {
+                                    return;
+                                  }
+                                  await controller.moveShotToScene(
+                                    shotId: shot.id,
+                                    targetSceneId: value,
+                                  );
+                                  if (!sheetContext.mounted) {
+                                    return;
+                                  }
+                                  Navigator.of(sheetContext).pop();
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '镜号',
+                                initialValue: shot.shotNo,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.shotNo.storageKey,
+                                  value: value,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: shot.shotSize.isEmpty ? null : shot.shotSize,
+                                decoration: const InputDecoration(labelText: '景别'),
+                                items: fixedFieldOptions(
+                                  ShotFieldKey.shotSize.storageKey,
+                                  customOptionsByFieldKey: fixedOptions,
+                                )
+                                    .map(
+                                      (item) => DropdownMenuItem(
+                                        value: item,
+                                        child: Text(item),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) async {
+                                  await controller.updateShotField(
+                                    shotId: shot.id,
+                                    fieldKey: ShotFieldKey.shotSize.storageKey,
+                                    value: value ?? '',
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '时长(秒)',
+                                initialValue: shot.durationSec.toString(),
+                                keyboardType: TextInputType.number,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.durationSec.storageKey,
+                                  value: int.tryParse(value) ?? 0,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              buildImageField(
+                                label: '画面',
+                                fieldKey: ShotFieldKey.frameImage.storageKey,
+                                asset: shot.frameImage,
+                              ),
+                              const SizedBox(height: 12),
+                              buildImageField(
+                                label: '参考图',
+                                fieldKey: ShotFieldKey.referenceImage.storageKey,
+                                asset: shot.referenceImage,
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '画面内容',
+                                initialValue: shot.content,
+                                minLines: 3,
+                                maxLines: 5,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.content.storageKey,
+                                  value: value,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '台词',
+                                initialValue: shot.dialogue,
+                                minLines: 2,
+                                maxLines: 4,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.dialogue.storageKey,
+                                  value: value,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '备注',
+                                initialValue: shot.notes,
+                                minLines: 2,
+                                maxLines: 4,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.notes.storageKey,
+                                  value: value,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '场景预期',
+                                initialValue: shot.sceneExpectation,
+                                minLines: 2,
+                                maxLines: 4,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.sceneExpectation.storageKey,
+                                  value: value,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              buildTextField(
+                                label: '声音',
+                                initialValue: shot.audio,
+                                minLines: 2,
+                                maxLines: 4,
+                                onCommit: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.audio.storageKey,
+                                  value: value,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: shot.cameraAngle.isEmpty ? null : shot.cameraAngle,
+                                decoration: const InputDecoration(labelText: '机位角度'),
+                                items: fixedFieldOptions(
+                                  ShotFieldKey.cameraAngle.storageKey,
+                                  customOptionsByFieldKey: fixedOptions,
+                                )
+                                    .map(
+                                      (item) => DropdownMenuItem(
+                                        value: item,
+                                        child: Text(item),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.cameraAngle.storageKey,
+                                  value: value ?? '',
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: shot.cameraMove.isEmpty ? null : shot.cameraMove,
+                                decoration: const InputDecoration(labelText: '运镜'),
+                                items: fixedFieldOptions(
+                                  ShotFieldKey.cameraMove.storageKey,
+                                  customOptionsByFieldKey: fixedOptions,
+                                )
+                                    .map(
+                                      (item) => DropdownMenuItem(
+                                        value: item,
+                                        child: Text(item),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.cameraMove.storageKey,
+                                  value: value ?? '',
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: shot.cameraRig.isEmpty ? null : shot.cameraRig,
+                                decoration: const InputDecoration(labelText: '机位设备'),
+                                items: fixedFieldOptions(
+                                  ShotFieldKey.cameraRig.storageKey,
+                                  customOptionsByFieldKey: fixedOptions,
+                                )
+                                    .map(
+                                      (item) => DropdownMenuItem(
+                                        value: item,
+                                        child: Text(item),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.cameraRig.storageKey,
+                                  value: value ?? '',
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: shot.focalLength.isEmpty ? null : shot.focalLength,
+                                decoration: const InputDecoration(labelText: '焦段'),
+                                items: fixedFieldOptions(
+                                  ShotFieldKey.focalLength.storageKey,
+                                  customOptionsByFieldKey: fixedOptions,
+                                )
+                                    .map(
+                                      (item) => DropdownMenuItem(
+                                        value: item,
+                                        child: Text(item),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) => controller.updateShotField(
+                                  shotId: shot.id,
+                                  fieldKey: ShotFieldKey.focalLength.storageKey,
+                                  value: value ?? '',
+                                ),
+                              ),
+                              for (final column in customColumns) ...[
+                                const SizedBox(height: 12),
+                                switch (column.type) {
+                                  CustomColumnType.text => buildTextField(
+                                    label: column.name,
+                                    initialValue:
+                                        (shot.customFieldValues[column.fieldKey] as String?) ?? '',
+                                    onCommit: (value) => controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey: column.fieldKey,
+                                      value: value,
+                                    ),
+                                  ),
+                                  CustomColumnType.number => buildTextField(
+                                    label: column.name,
+                                    initialValue:
+                                        '${shot.customFieldValues[column.fieldKey] ?? ''}',
+                                    keyboardType: const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                    onCommit: (value) => controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey: column.fieldKey,
+                                      value: double.tryParse(value) ?? 0,
+                                    ),
+                                  ),
+                                  CustomColumnType.singleSelect => DropdownButtonFormField<String>(
+                                    initialValue: (shot.customFieldValues[column.fieldKey] as String?)
+                                            ?.isEmpty ==
+                                        true
+                                        ? null
+                                        : shot.customFieldValues[column.fieldKey] as String?,
+                                    decoration: InputDecoration(labelText: column.name),
+                                    items: column.options
+                                        .map(
+                                          (item) => DropdownMenuItem<String>(
+                                            value: item,
+                                            child: Text(item),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (value) => controller.updateShotField(
+                                      shotId: shot.id,
+                                      fieldKey: column.fieldKey,
+                                      value: value ?? '',
+                                    ),
+                                  ),
+                                  CustomColumnType.image => buildImageField(
+                                    label: column.name,
+                                    fieldKey: column.fieldKey,
+                                    asset: shot.customFieldValues[column.fieldKey] as AssetRef?,
+                                  ),
+                                  _ => const SizedBox.shrink(),
+                                },
+                              ],
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () async {
+                                  await controller.deleteShot(shot.id);
+                                  if (!sheetContext.mounted) {
+                                    return;
+                                  }
+                                  Navigator.of(sheetContext).pop();
+                                },
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                label: const Text('删除镜头'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             );
           },
         );

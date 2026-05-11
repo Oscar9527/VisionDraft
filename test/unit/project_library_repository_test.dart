@@ -41,6 +41,7 @@ void main() {
         supportDirectory: supportDirectory,
         cacheDirectory: cacheDirectory,
         tempExportsDirectory: exportsDirectory,
+        projectsDirectory: projectParent,
         indexDatabaseFile: indexFile,
       ),
     );

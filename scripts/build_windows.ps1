@@ -15,6 +15,30 @@ function Convert-ToBase64 {
   return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Value))
 }
 
+function Remove-UnsupportedWindowsPluginReferences {
+  param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+  $generatedPluginsPath = Join-Path $RepoRoot "windows\flutter\generated_plugins.cmake"
+  if (Test-Path $generatedPluginsPath) {
+    $cmakeContent = Get-Content $generatedPluginsPath -Raw
+    $updatedCmakeContent = $cmakeContent -replace "(?m)^\s*flutter_secure_storage_windows\r?\n", ""
+    if ($updatedCmakeContent -ne $cmakeContent) {
+      Set-Content -Path $generatedPluginsPath -Value $updatedCmakeContent -Encoding UTF8
+    }
+  }
+
+  $registrantPath = Join-Path $RepoRoot "windows\flutter\generated_plugin_registrant.cc"
+  if (Test-Path $registrantPath) {
+    $registrantContent = Get-Content $registrantPath -Raw
+    $updatedRegistrantContent = $registrantContent `
+      -replace '(?m)^#include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin\.h>\r?\n', '' `
+      -replace "(?ms)\s*FlutterSecureStorageWindowsPluginRegisterWithRegistrar\(\r?\n\s*registry->GetRegistrarForPlugin\(\""FlutterSecureStorageWindowsPlugin\""\)\);\r?\n", ""
+    if ($updatedRegistrantContent -ne $registrantContent) {
+      Set-Content -Path $registrantPath -Value $updatedRegistrantContent -Encoding UTF8
+    }
+  }
+}
+
 function Write-GeneratedConfig {
   param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -127,16 +151,16 @@ if (-not (Test-Path $vsDevCmd)) {
 
 $flutterTool = Join-Path $flutterRoot "bin\flutter.bat"
 $packageConfig = Join-Path $repoRoot ".dart_tool\package_config.json"
-if (-not (Test-Path $packageConfig) -or -not (Test-Path $dependenciesFile)) {
-  & $flutterTool pub get
-  if ($LASTEXITCODE -ne 0) {
-    throw "flutter pub get failed with exit code $LASTEXITCODE"
-  }
+& $flutterTool pub get
+if ($LASTEXITCODE -ne 0) {
+  throw "flutter pub get failed with exit code $LASTEXITCODE"
 }
 
 if (-not (Test-Path $dependenciesFile)) {
   throw "Missing .flutter-plugins-dependencies after pub get."
 }
+
+Remove-UnsupportedWindowsPluginReferences -RepoRoot $repoRoot
 
 New-Item -ItemType Directory -Force -Path $pluginRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
@@ -157,7 +181,9 @@ Write-GeneratedConfig -RepoRoot $repoRoot -FlutterRoot $flutterRoot -GeneratedCo
 
 $deps = Get-Content $dependenciesFile -Raw | ConvertFrom-Json
 $windowsPlugins = @($deps.plugins.windows) + @($deps.plugins.windows_ffi)
-$windowsPlugins = $windowsPlugins | Where-Object { $_ -and $_.name -and $_.path } | Sort-Object name -Unique
+$windowsPlugins = $windowsPlugins |
+  Where-Object { $_ -and $_.name -and $_.path -and $_.name -ne "flutter_secure_storage_windows" } |
+  Sort-Object name -Unique
 
 foreach ($plugin in $windowsPlugins) {
   $name = $plugin.name
@@ -218,23 +244,17 @@ if ($LASTEXITCODE -ne 0) {
   throw "CMake build/install failed with exit code $LASTEXITCODE"
 }
 
-$runtimeEntries = @(
-  "vision_draft.exe",
-  "flutter_windows.dll",
-  "pdfium.dll",
-  "file_selector_windows_plugin.dll",
-  "printing_plugin.dll",
-  "sqlite3_flutter_libs_plugin.dll",
-  "sqlite3.dll",
-  "data"
+$excludedRunnerArtifacts = @(
+  "CMakeFiles",
+  "Makefile",
+  "cmake_install.cmake"
 )
 
+$runtimeEntries = Get-ChildItem -Path $runnerDir -Force |
+  Where-Object { $excludedRunnerArtifacts -notcontains $_.Name }
+
 foreach ($entry in $runtimeEntries) {
-  $source = Join-Path $runnerDir $entry
-  if (-not (Test-Path $source)) {
-    throw "Missing runtime artifact: $source"
-  }
-  Copy-Item -Path $source -Destination $stagingDistDir -Recurse -Force
+  Copy-Item -Path $entry.FullName -Destination $stagingDistDir -Recurse -Force
 }
 
 $placeholderAssetsDir = Join-Path $stagingDistDir "data\flutter_assets\assets\placeholders"
@@ -242,7 +262,7 @@ if (Test-Path $placeholderAssetsDir) {
   Remove-Item $placeholderAssetsDir -Recurse -Force
 }
 
-foreach ($artifact in @("CMakeFiles", "Makefile", "cmake_install.cmake")) {
+foreach ($artifact in $excludedRunnerArtifacts) {
   $artifactPath = Join-Path $stagingDistDir $artifact
   if (Test-Path $artifactPath) {
     Remove-Item $artifactPath -Recurse -Force

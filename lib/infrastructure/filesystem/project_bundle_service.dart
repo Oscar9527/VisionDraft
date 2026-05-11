@@ -89,7 +89,10 @@ class ProjectBundleService {
     if (!await sourceDir.exists()) {
       throw AppException('Project bundle not found: ${bundle.rootPath}');
     }
-    final targetPath = p.join(targetDirectory.path, '${bundle.id}.zip');
+    final targetPath = p.join(
+      targetDirectory.path,
+      '${_sanitizeBundleName(bundle.name)}.zip',
+    );
     final encoder = ZipFileEncoder()..create(targetPath);
     encoder.addDirectory(sourceDir);
     encoder.close();
@@ -102,15 +105,65 @@ class ProjectBundleService {
   }) async {
     final archiveBytes = await zipFile.readAsBytes();
     final archive = ZipDecoder().decodeBytes(archiveBytes);
-    extractArchiveToDisk(archive, targetDirectory.path);
-    final directories = targetDirectory
-        .listSync()
-        .whereType<Directory>()
-        .toList()
-      ..sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
-    if (directories.isEmpty) {
-      throw const AppException('No project bundle directory found after import');
+    final stagingRoot = Directory(
+      p.join(
+        targetDirectory.path,
+        '.import_${DateTime.now().microsecondsSinceEpoch}',
+      ),
+    );
+    await stagingRoot.create(recursive: true);
+    try {
+      extractArchiveToDisk(archive, stagingRoot.path);
+      final bundleDirectory = await _findImportedBundleDirectory(stagingRoot);
+      if (bundleDirectory == null) {
+        throw const AppException('No project bundle directory found after import');
+      }
+      final basename = p.basename(bundleDirectory.path);
+      final targetPath = await _resolveAvailableDirectoryPath(
+        targetDirectory,
+        basename,
+      );
+      final movedDirectory = await bundleDirectory.rename(targetPath);
+      return loadBundle(movedDirectory);
+    } finally {
+      if (await stagingRoot.exists()) {
+        await stagingRoot.delete(recursive: true);
+      }
     }
-    return loadBundle(directories.first);
+  }
+
+  Future<Directory?> _findImportedBundleDirectory(Directory root) async {
+    final stack = <Directory>[root];
+    while (stack.isNotEmpty) {
+      final current = stack.removeLast();
+      await for (final entity in current.list()) {
+        if (entity is! Directory) {
+          continue;
+        }
+        if (p.extension(entity.path).toLowerCase() == '.vdraft') {
+          final manifestFile = File(p.join(entity.path, 'manifest.json'));
+          if (await manifestFile.exists()) {
+            return entity;
+          }
+        }
+        stack.add(entity);
+      }
+    }
+    return null;
+  }
+
+  Future<String> _resolveAvailableDirectoryPath(
+    Directory parentDirectory,
+    String basename,
+  ) async {
+    final extension = p.extension(basename);
+    final stem = p.basenameWithoutExtension(basename);
+    var candidate = p.join(parentDirectory.path, basename);
+    var suffix = 2;
+    while (await Directory(candidate).exists()) {
+      candidate = p.join(parentDirectory.path, '$stem-$suffix$extension');
+      suffix += 1;
+    }
+    return candidate;
   }
 }

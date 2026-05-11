@@ -22,8 +22,12 @@ import '../../features/storyboard_editor/application/editor_grid_session.dart';
 import '../../infrastructure/database/app_index_database.dart';
 import '../../infrastructure/database/drift_project_library_repository.dart';
 import '../../infrastructure/database/drift_project_workspace_repository.dart';
+import '../../infrastructure/filesystem/ai_secret_store.dart';
 import '../../infrastructure/filesystem/app_preferences_service.dart';
 import '../../infrastructure/filesystem/app_storage_service.dart';
+import '../../infrastructure/filesystem/document_output_service.dart';
+import '../../infrastructure/filesystem/media_import_service.dart';
+import '../../infrastructure/filesystem/platform_path_service.dart';
 import '../../infrastructure/filesystem/project_bundle_service.dart';
 import '../../infrastructure/imaging/asset_fingerprint_service.dart';
 import '../../infrastructure/imaging/asset_health_check_use_case.dart';
@@ -44,6 +48,24 @@ final appStorageServiceProvider = Provider<AppStorageService>((ref) {
 final appPreferencesServiceProvider = Provider<AppPreferencesService>((ref) {
   return AppPreferencesService(
     storageService: ref.watch(appStorageServiceProvider),
+  );
+});
+
+final platformPathServiceProvider = Provider<PlatformPathService>((ref) {
+  return const PlatformPathService();
+});
+
+final documentOutputServiceProvider = Provider<DocumentOutputService>((ref) {
+  return const DocumentOutputService();
+});
+
+final mediaImportServiceProvider = Provider<MediaImportService>((ref) {
+  return const MediaImportService();
+});
+
+final aiSecretStoreProvider = Provider<AiSecretStore>((ref) {
+  return PlatformAiSecretStore(
+    preferencesService: ref.watch(appPreferencesServiceProvider),
   );
 });
 
@@ -121,6 +143,7 @@ final aiProviderSettingsRepositoryProvider =
     Provider<AiProviderSettingsRepository>((ref) {
       return AiProviderSettingsRepository(
         preferencesService: ref.watch(appPreferencesServiceProvider),
+        secretStore: ref.watch(aiSecretStoreProvider),
       );
     });
 

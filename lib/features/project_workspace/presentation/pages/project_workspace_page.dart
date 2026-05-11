@@ -1,3 +1,5 @@
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,7 @@ import '../../../export/presentation/pages/export_page.dart';
 import '../../../shooting_plan/presentation/pages/shooting_plan_page.dart';
 import '../../../storyboard_board/presentation/pages/storyboard_board_page.dart';
 import '../../../storyboard_editor/presentation/pages/storyboard_editor_page.dart';
+import '../../domain/models/project_bundle.dart';
 import '../widgets/workspace_header.dart';
 
 enum WorkspaceSection { editor, board, shootingPlan, callSheet }
@@ -75,7 +78,10 @@ class ProjectWorkspacePage extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('项目加载失败', style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    '项目加载失败',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 12),
                   SelectableText(snapshot.errorMessage!),
                   const SizedBox(height: 16),
@@ -119,6 +125,9 @@ class ProjectWorkspacePage extends ConsumerWidget {
           onSectionSelected: (next) {
             context.go('/projects/$projectId/${next.path}');
           },
+          onProjectPackagePressed: () async {
+            await _exportProjectPackage(context, ref, snapshot.bundle);
+          },
           onExportPressed: () {
             context.go('/projects/$projectId/call-sheet');
           },
@@ -148,5 +157,58 @@ class ProjectWorkspacePage extends ConsumerWidget {
         },
       ),
     );
+  }
+
+  Future<void> _exportProjectPackage(
+    BuildContext context,
+    WidgetRef ref,
+    ProjectBundle bundle,
+  ) async {
+    try {
+      final paths = await ref.read(appStoragePathsProvider.future);
+      final zipFile = await ref
+          .read(projectBundleServiceProvider)
+          .exportAsZip(bundle, paths.tempExportsDirectory);
+
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await ref.read(documentOutputServiceProvider).shareDocument(
+              bytes: await zipFile.readAsBytes(),
+              filename: zipFile.uri.pathSegments.last,
+              subject: '${bundle.name} 项目包',
+              text: '来自 VisionDraft 的项目包',
+            );
+        if (!context.mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已调起系统分享项目包')));
+        return;
+      }
+
+      final result = await ref.read(documentOutputServiceProvider).saveDocument(
+            bytes: await zipFile.readAsBytes(),
+            filename: zipFile.uri.pathSegments.last,
+            initialDirectory: bundle.rootPath,
+            typeGroup: const XTypeGroup(
+              label: 'VisionDraft Archive',
+              extensions: ['zip'],
+            ),
+            confirmButtonText: '导出项目包',
+          );
+      if (!context.mounted || result == null) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('项目包已导出到 ${result.file.path}')));
+    } catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出项目包失败：$error')));
+    }
   }
 }

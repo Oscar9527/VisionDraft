@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -484,23 +483,19 @@ class _AiStoryboardSheetState extends ConsumerState<_AiStoryboardSheet> {
   }
 
   Future<void> _pickScriptFile() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'Script Text', extensions: ['txt', 'md']),
-      ],
-    );
-    if (file == null) {
+    final filePath = await ref.read(mediaImportServiceProvider).pickTextFile();
+    if (filePath == null || filePath.isEmpty) {
       return;
     }
 
     try {
-      final content = await File(file.path).readAsString();
+      final content = await File(filePath).readAsString();
       if (!mounted) {
         return;
       }
       ref
           .read(aiStoryboardControllerProvider(widget.projectId).notifier)
-          .updateScriptInput(content, sourceLabel: p.basename(file.path));
+          .updateScriptInput(content, sourceLabel: p.basename(filePath));
     } catch (error) {
       if (!mounted) {
         return;

@@ -10,6 +10,8 @@ abstract interface class ProjectLibraryRepository {
 
   Future<ProjectLibraryEntry> registerExistingProject(String bundlePath);
 
+  Future<ProjectLibraryEntry> importProjectArchive(String archivePath);
+
   Future<void> deleteProject(String projectId);
 
   Future<String?> findBundlePath(String projectId);
